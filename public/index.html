@@ -18,6 +18,15 @@
 })();
 </script>
 <title>LIZI</title>
+<!-- PWA / iOS：可安装 + 锁屏媒体信息（见 pwa.js / sw.js） -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#05060a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="LIZI">
+<link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+<script src="/pwa.js" defer></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <!-- Google Fonts 必须异步：这行以前是普通 stylesheet，字体站慢一点/连不上时，

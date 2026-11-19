@@ -4218,6 +4218,7 @@ const MIME_EXTRA = {
   '.wasm': 'application/wasm', '.avif': 'image/avif', '.webp': 'image/webp',
   '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf',
   '.bin': 'application/octet-stream', '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json',
+  '.webmanifest': 'application/manifest+json',
 };
 const mimeOf = (fp) => MIME[path.extname(fp).toLowerCase()] || MIME_EXTRA[path.extname(fp).toLowerCase()] || 'application/octet-stream';
 
