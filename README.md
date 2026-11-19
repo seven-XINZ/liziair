@@ -35,6 +35,19 @@ node server.mjs
 要求：Node 18+（用到内置 `fetch`）。**网页版服务端零 npm 依赖**，不用 `npm install`；
 桌面打包需要构建依赖（`npm install`，见 [RELEASE.md](RELEASE.md)）。
 
+### Docker 部署
+
+仓库根目录自带 `Dockerfile`，可打成单容器镜像（登录态落在持久化卷，重建容器不丢）：
+
+```bash
+docker build -t liziair:latest .
+docker run -d --name liziair --restart unless-stopped \
+  -p 8088:8088 -v /opt/liziair/data:/app \
+  -e TZ=Asia/Shanghai liziair:latest
+```
+
+完整说明、反代示例与运维命令见 [docker/README.md](docker/README.md)。
+
 ---
 
 ## 登录
@@ -277,6 +290,9 @@ POST /api/song/play/about/block/page   { songId }
 music-player/
 ├── server.mjs          零依赖服务端：weapi 加密 / 二维码登录 / cookie 落盘 / 静态托管
 ├── start.cmd           双击启动
+├── Dockerfile          单容器镜像构建（上下文 = 仓库根）
+├── docker-entrypoint.sh 容器启动入口：初始化/同步卷内代码，保留登录态
+├── docker/             Docker 部署说明与 nginx 反代示例
 ├── .session.json       登录态（自动生成，别外传）
 └── public/
     ├── index.html      结构 + 内联 SVG 图标库（无 emoji）

@@ -1,0 +1,25 @@
+# 依赖（边车依赖在镜像内安装，不随上下文拷贝）
+**/node_modules/
+
+# 运行时状态 / 凭证（持久化卷提供，不进镜像层）
+.port
+.session.json
+.netease-device.json
+*.auth-*
+*.log
+server.err.log
+
+# 截图 / 本地留档 / 备份
+shots/
+_*.json
+*.bak
+*.bak-*
+*.bak2
+
+# 打包产物与版本库元数据
+dist/
+.git/
+.github/
+.scratch-*/
+.claude/
+__pycache__/
