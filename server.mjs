@@ -4401,33 +4401,17 @@ async function serveStatic(req, res, url) {
    设备配对（Windows / 安卓客户端：域名 + key 一次登录，长期免登）
    --------------------------------------------------------------------------
    密钥来源：环境变量 LIZI_ACCESS_KEY，或数据目录下的 .access-key 文件。
-   **两者都为空 = 门禁关闭**，站点行为与以前完全一致（不影响现有浏览器访问）。
-   一旦设置密钥：页面与 /api/* 都需要有效令牌，只有 /healthz 与配对接口放行。
+   **两者都为空 = 不启用**，站点行为与以前完全一致（不影响现有浏览器访问）。
 
-   令牌是无状态的：`过期时间.HMAC_SHA256(key, 'lizi-access:'+过期时间)`，
-   服务端不存会话，重启不失效；换密钥即让所有旧令牌立刻作废。
-   客户端可用 Cookie、Authorization: Bearer，或 ?lizi_key= 三种方式携带。
+   对接时客户端在 POST /api/pair 的 body 里带上 key，服务端用定时安全比对
+   直接校验；通过后返回各平台登录态汇总。客户端不保存 Cookie、不存会话，
+   只记住域名与 key。密钥可在设置页查看 / 重新生成（环境变量来源不可重置）。
    ========================================================================== */
-const ACCESS_COOKIE = 'lizi_access';
-const ACCESS_TTL_MS = 30 * 24 * 60 * 60 * 1000;      // 30 天
 
 function accessKey() {
   const fromEnv = String(process.env.LIZI_ACCESS_KEY || '').trim();
   if (fromEnv) return fromEnv;
   try { return String(fs.readFileSync(dataPath('.access-key'), 'utf8') || '').trim(); } catch { return ''; }
-}
-function signToken(exp, key) {
-  return exp + '.' + crypto.createHmac('sha256', key).update('lizi-access:' + exp).digest('hex');
-}
-function tokenValid(token, key) {
-  if (!token || !key) return false;
-  const i = String(token).lastIndexOf('.');
-  if (i < 1) return false;
-  const exp = Number(token.slice(0, i));
-  if (!Number.isFinite(exp) || exp < Date.now()) return false;
-  const want = signToken(exp, key);
-  const a = Buffer.from(want), b = Buffer.from(String(token));
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 /* 各平台登录态汇总：客户端据此画绿标（已登录）/ 红标（未登录）。
    网易云走本地 session，其余边车走各自 /status；任一超时或报错都算未登录，不卡整体。 */
@@ -4455,18 +4439,6 @@ async function platformStates() {
   }));
 }
 
-function reqToken(req, url) {
-  const auth = String(req.headers.authorization || '');
-  if (/^Bearer\s+/i.test(auth)) return auth.replace(/^Bearer\s+/i, '').trim();
-  const q = url.searchParams.get('lizi_key');
-  if (q) return q;
-  const raw = String(req.headers.cookie || '');
-  for (const part of raw.split(';')) {
-    const [k, ...v] = part.trim().split('=');
-    if (k === ACCESS_COOKIE) return decodeURIComponent(v.join('='));
-  }
-  return '';
-}
 
 async function routeRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -4478,7 +4450,7 @@ async function routeRequest(req, res) {
 
   /* ---- 设备配对：客户端输入「域名 + key」换长期令牌，之后免重复登录 ---- */
   if (url.pathname === '/api/pair/status') {
-    return json(res, 200, { enabled: !!accessKey(), cookie: ACCESS_COOKIE, ttlDays: ACCESS_TTL_MS / 86400000 });
+    return json(res, 200, { keyRequired: !!accessKey() });
   }
   if (url.pathname === '/api/pair' && req.method === 'POST') {
     /* key 只用于「软件对接」，不是网页门禁：网页照常访问，登录态始终留在服务端。
@@ -4493,6 +4465,23 @@ async function routeRequest(req, res) {
       }
     }
     return json(res, 200, { ok: true, keyRequired: !!key, platforms: await platformStates() });
+  }
+  /* ---- 对接密钥：查看 / 重新生成（设置页用）---- */
+  if (url.pathname === '/api/access-key') {
+    const envKey = String(process.env.LIZI_ACCESS_KEY || '').trim();
+    return json(res, 200, { key: accessKey(), keyRequired: !!accessKey(), fromEnv: !!envKey });
+  }
+  if (url.pathname === '/api/access-key/regenerate' && req.method === 'POST') {
+    if (String(process.env.LIZI_ACCESS_KEY || '').trim()) {
+      return json(res, 409, { ok: false, error: '当前密钥来自环境变量 LIZI_ACCESS_KEY，请改环境变量后重启容器' });
+    }
+    const key = crypto.randomBytes(24).toString('base64').replace(/[+/=]/g, '').slice(0, 28);
+    try {
+      fs.writeFileSync(dataPath('.access-key'), key, { mode: 0o600 });
+    } catch (e) {
+      return json(res, 500, { ok: false, error: '写入失败：' + e.message });
+    }
+    return json(res, 200, { ok: true, key });
   }
   if (url.pathname === '/api/platforms') {
     return json(res, 200, { keyRequired: !!accessKey(), platforms: await platformStates() });

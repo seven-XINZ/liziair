@@ -16,7 +16,7 @@
 <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
 <script src="/pwa.js" defer></script>
 <!-- 字体：本地 Geist / Geist Mono / Fraunces（与桌面同一套字族），不走 Google Fonts -->
-<link rel="stylesheet" href="/m/fonts.css">
+<link rel="stylesheet" href="/fonts.css">
 <link rel="stylesheet" href="assets/liquid-glass.css">
 <link rel="stylesheet" href="tokens.css">
     <link rel="stylesheet" href="win-controls.css">
@@ -957,6 +957,20 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
           <span class="setpage__switch-knob" aria-hidden="true"></span>
         </button>
       </div>
+      <!-- 对接密钥：客户端（Windows / 安卓）用它与服务器对接。
+           不是网页门禁，网页照常访问；登录态始终在服务端。
+           见 app.js 的 paintAccessKey / server.mjs 的 /api/access-key -->
+      <div class="setpage__row setpage__row--key">
+        <span class="setpage__label-group">
+          <span class="setpage__label">客户端对接密钥</span>
+          <span class="setpage__hint" id="set-key-hint">桌面 / 安卓客户端填这串即可对接；网页访问不受影响</span>
+        </span>
+        <span class="keybox">
+          <code class="keybox__val" id="set-key-val">读取中…</code>
+          <button class="keybox__btn" id="set-key-copy" type="button" title="复制密钥">复制</button>
+          <button class="keybox__btn keybox__btn--gen" id="set-key-gen" type="button" title="重新生成密钥">重新生成</button>
+        </span>
+      </div>
       <!-- 铺色来源：默认关。关时大厅铺色态取当前专辑封面的 C 算法色板；
            打开后回到平台品牌色。自定义配色优先级更高。存 localStorage['lizi.hall.platColor']，
            见 app.js 的 setPlatColor / Hall.refreshThemeColors -->
@@ -1079,10 +1093,23 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
         <button class="setpage__act" id="set-bgfx-plat" type="button">跟随平台</button>
         <span class="bgfx__state" id="set-bgfx-state">跟随平台配色</span>
       </div>
+      <!-- 字体选择：2026-11-19 实装。中文走系统字体栈，切换瞬时、离线可用。
+           存 localStorage['lizi.font']，见 app.js 的 applyFont -->
       <div class="setpage__row">
-        <span class="setpage__label">字体选择</span>
-        <span class="setpage__hint">待开放</span>
-        <span class="setpage__val">Geist</span>
+        <span class="setpage__label-group">
+          <span class="setpage__label">字体选择</span>
+          <span class="setpage__hint" id="set-font-hint">全部字体本地自托管，无 CDN；切换立即生效</span>
+        </span>
+        <select class="setpage__select" id="set-font" aria-label="字体选择">
+          <option value="default">默认 · Geist</option>
+          <option value="serif">衬线 · Fraunces + 思源宋体</option>
+          <option value="mono">等宽 · JetBrains Mono</option>
+          <option value="kuaile">站酷快乐体</option>
+          <option value="kaiti">楷体</option>
+          <option value="yuanti">圆体</option>
+          <option value="heiti">黑体 · 思源黑体（本地）</option>
+          <option value="songti">宋体 · 思源宋体（本地）</option>
+        </select>
       </div>
       <div class="setpage__row">
         <span class="setpage__label">快捷键</span>

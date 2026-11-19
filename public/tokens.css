@@ -11,8 +11,8 @@
      Geist      正文与全部 UI
      Geist Mono 只用于时长、播放计数等数字
      --------------------------------------------------------------------- */
-  --font-display: "Fraunces", "Songti SC", Georgia, serif;
-  --font-body: "Geist", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-display: "Fraunces", "Lizi Serif SC", "Songti SC", Georgia, serif;
+  --font-body: "Geist", "Lizi Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, "SFMono-Regular", monospace;
 
   /* ---------------------------------------------------------------------

@@ -8672,3 +8672,119 @@ body.is-stage .updtoast { bottom: 18px; }
 }
 /* 折叠态：用户主动收起面板看海报，歌单区一并让位 */
 #view-hall.is-plat-folded .hall-quick { display: none; }
+
+/* ---------- 设置页：客户端对接密钥（2026-11-19） ---------- */
+.setpage__row--key { align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.keybox { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+.keybox__val {
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 12.5px; letter-spacing: .04em; padding: 5px 9px; border-radius: 8px;
+  background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.14);
+  max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  user-select: all; -webkit-user-select: all;
+}
+.keybox__btn {
+  padding: 5px 10px; font-size: 12px; border-radius: 8px; cursor: pointer;
+  background: rgba(255,255,255,.08); color: inherit; border: 1px solid rgba(255,255,255,.16);
+}
+.keybox__btn:hover { background: rgba(255,255,255,.16); }
+.keybox__btn--gen { background: linear-gradient(135deg,#4b7bff,#8a5cff); color: #fff; border: 0; }
+.keybox__btn:disabled { opacity: .5; cursor: default; }
+@media (max-width: 560px) {
+  .setpage__row--key { align-items: flex-start; }
+  .keybox { margin-left: 0; width: 100%; }
+  .keybox__val { max-width: 100%; flex: 1 1 100%; }
+}
+
+
+/* ==========================================================================
+   字体选择（2026-11-19 实装，原来是「待开放」）
+   --------------------------------------------------------------------------
+   中文一律走系统字体栈：全量中文 webfont 动辄十几 MB，切一次字体就要等半天，
+   移动端尤其难受。这里只用「本地已有的拉丁字体 + 系统中文栈」组合，
+   切换瞬时生效、离线可用、零额外下载。站酷快乐体是仓库里本来就带的中文字体。
+   ========================================================================== */
+
+/* 衬线：标题 Fraunces，正文中文宋体 */
+html[data-font="serif"] {
+  --font-display: "Fraunces", "Lizi Serif SC", "Songti SC", Georgia, serif;
+  --font-body: "Fraunces", "Lizi Serif SC", "Songti SC", Georgia, serif;
+}
+/* 等宽：终端感 */
+html[data-font="mono"] {
+  --font-display: "JetBrains Mono", "Geist Mono", ui-monospace, Consolas, monospace;
+  --font-body: "JetBrains Mono", "Geist Mono", ui-monospace, "PingFang SC", Consolas, monospace;
+  --font-mono: "JetBrains Mono", "Geist Mono", ui-monospace, Consolas, monospace;
+}
+/* 站酷快乐体：仓库自带的中文圆胖卡通体 */
+html[data-font="kuaile"] {
+  --font-display: "ZCOOL KuaiLe", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-body: "ZCOOL KuaiLe", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+/* 楷体：手写书信感 */
+html[data-font="kaiti"] {
+  --font-display: "Kaiti SC", "STKaiti", "KaiTi", "TW-Kai", serif;
+  --font-body: "Kaiti SC", "STKaiti", "KaiTi", "TW-Kai", "PingFang SC", serif;
+}
+/* 圆体：柔和 */
+html[data-font="yuanti"] {
+  --font-display: "Yuanti SC", "STYuanti", "幼圆", "YouYuan", "HarmonyOS Sans SC", sans-serif;
+  --font-body: "Yuanti SC", "STYuanti", "幼圆", "YouYuan", "HarmonyOS Sans SC", "PingFang SC", sans-serif;
+}
+/* 纯黑体：最干净，全部交给系统 */
+html[data-font="heiti"] {
+  --font-display: "Lizi Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-body: "Lizi Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+/* 宋体：正文阅读感 */
+html[data-font="songti"] {
+  --font-display: "Lizi Serif SC", "Songti SC", "SimSun", serif;
+  --font-body: "Lizi Serif SC", "Songti SC", "SimSun", serif;
+}
+
+/* 设置页下拉 */
+.setpage__select {
+  margin-left: auto; padding: 6px 10px; border-radius: 9px; font-size: 13px;
+  background: rgba(255,255,255,.07); color: inherit;
+  border: 1px solid rgba(255,255,255,.16); cursor: pointer; max-width: 190px;
+}
+.setpage__select:focus { outline: none; border-color: var(--ink, #6f8cff); }
+.setpage__select option { background: #12151d; color: #eaf2ff; }
+
+/* ---------- 首页歌单区优化（2026-11-19） ---------- */
+/* 骨架屏：呼吸动画，尺寸与真卡一致，数据回来不跳版 */
+.hq-card--sk { pointer-events: none; }
+.hq-card--sk .hq-card__cover,
+.hq-card--sk .hq-card__name,
+.hq-card--sk .hq-card__sub {
+  background: linear-gradient(100deg, rgba(255,255,255,.05) 30%, rgba(255,255,255,.12) 50%, rgba(255,255,255,.05) 70%);
+  background-size: 220% 100%; animation: hq-sk 1.3s ease-in-out infinite; border-radius: 8px;
+}
+.hq-card--sk .hq-card__cover { border-radius: 12px; }
+.hq-card--sk .hq-card__name { height: 12px; }
+.hq-card--sk .hq-card__sub { height: 10px; width: 55%; }
+@keyframes hq-sk { from { background-position: 180% 0; } to { background-position: -60% 0; } }
+
+/* 可滑动暗示：右侧渐隐，仅在还有内容时出现 */
+.hall-quick__row { position: relative; }
+.hall-quick { position: relative; }
+.hall-quick::after {
+  content: ''; position: absolute; right: 0; top: 28px; bottom: 6px; width: 42px;
+  pointer-events: none; opacity: 0; transition: opacity .25s ease;
+  background: linear-gradient(90deg, transparent, var(--bg, #05060a));
+}
+.hall-quick:has(.hall-quick__row.is-more)::after,
+.hall-quick.is-more::after { opacity: 1; }
+
+/* 卡片交互反馈 */
+.hq-card { transition: transform .18s ease; }
+.hq-card:not([disabled]):hover { transform: translateY(-2px); }
+.hq-card:not([disabled]):active { transform: translateY(0) scale(.985); }
+.hq-card:focus-visible { outline: 2px solid var(--ink, #6f8cff); outline-offset: 3px; border-radius: 12px; }
+/* 未登录引导卡：可点，虚线边提示「这是个动作」 */
+.hq-card--cta .hq-card__cover { border: 1px dashed rgba(255,255,255,.28); background: rgba(255,255,255,.04); }
+.hq-card--cta .hq-card__sub { opacity: .85; }
+@media (prefers-reduced-motion: reduce) {
+  .hq-card--sk .hq-card__cover, .hq-card--sk .hq-card__name, .hq-card--sk .hq-card__sub { animation: none; }
+  .hq-card { transition: none; }
+}

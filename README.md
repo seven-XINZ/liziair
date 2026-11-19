@@ -87,10 +87,12 @@ docker compose up -d --build
 
 - **密钥来源**：环境变量 `LIZI_ACCESS_KEY`，或数据目录下的 `.access-key` 文件；两者都为空 = 不启用。
 - **接口**：
-  - `GET /api/pair/status`：返回是否启用、Cookie 名与有效期天数
-  - `POST /api/pair`：校验密钥后返回各平台登录态汇总；客户端不保存 Cookie，只记住域名与 key
+  - `GET /api/pair/status`：返回是否启用密钥（`keyRequired`）
+  - `POST /api/pair`：body 带 `key`，定时安全比对通过后返回各平台登录态汇总；客户端不保存 Cookie，只记住域名与 key
   - `GET /api/platforms`：各平台登录态汇总（已登录 / 昵称 / UID）
-- **无状态令牌**：`过期时间.HMAC_SHA256(key, 'lizi-access:'+过期时间)`，有效期 30 天；服务端不存会话，重启不失效，换密钥即作废。可经 Cookie `lizi_access`、`Authorization: Bearer` 或 `?lizi_key=` 三种方式携带。
+  - `GET /api/access-key`：查看当前密钥与来源（`key` / `keyRequired` / `fromEnv`），供设置页展示
+  - `POST /api/access-key/regenerate`：重新生成 28 位随机密钥写入 `.access-key`（权限 `0600`）；若密钥来自环境变量 `LIZI_ACCESS_KEY`，返回 `409`，需改环境变量后重启容器
+- **鉴权方式**：客户端在请求中携带对接密钥，服务端直接做定时安全比对；不发无状态令牌、不存会话，换密钥即让旧密钥失效。
 
 ---
 
@@ -134,13 +136,14 @@ liziair/
     ├── sw.js             Service Worker：网络优先 + 静态资源缓存优先，接口与音频直连
     ├── pwa.js            SW 注册 / Media Session 锁屏控制 / iOS 后台自愈与提示
     ├── tokens.css        设计令牌：字体 / 字号 / 间距 / OKLCH 色板 / 动效
+    ├── fonts.css         自托管 @font-face 表（零 CDN），按 unicode-range 分片引用本地 woff2
     ├── app.css           布局与排版（玻璃表面样式来自引擎的 .lg-surface）
     ├── api.js            前端 API 层（封面走 /api/img 代理，绕开防盗链）
     ├── beat.js           节拍检测：起音检测 / 自相关测速 / 拍相位 / 频谱（iOS 绕开 Web Audio）
     ├── player.js         播放引擎：队列 / YRC+LRC 解析 / 演示音轨合成 / 封面包彩 / 播放恢复阶梯
     ├── app.js            UI 装配：视图切换、歌词面板、节拍器、登录、歌单、搜索、拖拽、滑动手势
     ├── audio/glide.js    交叉淡化与 Web Audio 能力探测（不可用时回退普通切歌）
-    └── assets/          液态玻璃引擎（liquid-glass.js + .css）与 PWA 图标（icons/）
+    └── assets/          液态玻璃引擎（liquid-glass.js + .css）、PWA 图标（icons/）与自托管字体（fonts/）
 ```
 
 > `public/` 下另有 `lab/`、`*-lab.html`、`proto/`、`stages/`、`player-skins/` 等视觉实验与原型目录，属开发过程产物，不影响主流程运行。
@@ -306,7 +309,7 @@ POST /api/song/play/about/block/page   { songId }
 
 视觉整理遵循一套统一规范：
 
-- **字体 3 族封顶**。Fraunces（品牌名 + 播放页大标题，做为一个“印出来的”register）· Geist（正文与全部 UI）· Geist Mono（时长、播放数等数字）。全部走 `--font-*` 令牌。
+- **字体 3 族封顶，默认令牌栈**：Fraunces（品牌名 + 播放页大标题，做为一个“印出来的”register）· Geist（正文与全部 UI）· Geist Mono（时长、播放数等数字），全部走 `--font-*` 令牌。字体文件全部自托管在 `public/assets/fonts/`，经 `public/fonts.css` 按 unicode-range 分片加载，**零 Google Fonts CDN**；设置页另提供 serif / mono / 快乐体 / 楷体 / 圆体 / 黑体 / 宋体等 8 套预设，只切换 `html[data-font]`、由 `app.css` 覆盖令牌。
 - **禁止 emoji**。所有图标是内联 SVG symbol，通过 `<use href="#i-*">` 引用，换图标就改 href。
 - **颜色全部 OKLCH 且令牌化**，只允许引用 `var(--*)`，不内联色值。accent 只有一个（平台强调红）。
 - **间距 4pt 级数**，所有留白由 `--sp-1`～`--sp-10` 拼出，没有 7px / 13px 这种野值。

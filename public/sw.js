@@ -8,7 +8,7 @@
  *  · 图标/字体/图片走"缓存优先"：这些基本不变，省流量
  * 只做到"可安装 + 断网有壳"，不做激进离线，避免把旧代码钉在用户手机上。
  */
-const VERSION = 'lizi-pwa-v1';
+const VERSION = 'lizi-pwa-v2';
 const SHELL = ['/', '/manifest.webmanifest', '/assets/icons/icon-192.png', '/assets/icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {

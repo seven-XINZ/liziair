@@ -3928,8 +3928,73 @@
   $('set-hall-rail').addEventListener('click', () => setHallRail(!hallRailOn()));
   paintHallRailSwitch();
 
+  /* ---- 字体选择（2026-11-19 实装）----
+     只改 html[data-font]，由 app.css 里的预设覆盖 --font-* 变量，
+     不动任何组件样式；刷新后从 localStorage 恢复。 */
+  const FONT_KEY = 'lizi.font';
+  const FONTS = ['default','serif','mono','kuaile','kaiti','yuanti','heiti','songti'];
+  function applyFont(id) {
+    const v = FONTS.indexOf(id) >= 0 ? id : 'default';
+    if (v === 'default') document.documentElement.removeAttribute('data-font');
+    else document.documentElement.setAttribute('data-font', v);
+    try { localStorage.setItem(FONT_KEY, v); } catch (e) { /* 隐私模式 */ }
+    const sel = $('set-font');
+    if (sel && sel.value !== undefined) sel.value = v;
+  }
+  (function initFont() {
+    let saved = 'default';
+    try { saved = localStorage.getItem(FONT_KEY) || 'default'; } catch (e) { /* ignore */ }
+    applyFont(saved);
+    const sel = $('set-font');
+    if (sel && sel.addEventListener) sel.addEventListener('change', () => applyFont(sel.value));
+  })();
+
+  /* ---- 客户端对接密钥：显示 / 复制 / 重新生成（2026-11-19）----
+     key 只用于桌面与安卓客户端对接，不是网页门禁；登录态始终在服务端。 */
+  async function paintAccessKey() {
+    const val = $('set-key-val'), hint = $('set-key-hint');
+    try {
+      const r = await fetch('/api/access-key');
+      const d = await r.json();
+      val.textContent = d.key || '（未设置，客户端留空即可）';
+      if (hint) hint.textContent = d.fromEnv
+        ? '密钥来自环境变量 LIZI_ACCESS_KEY，修改需重启容器'
+        : (d.key ? '桌面 / 安卓客户端填这串即可对接；网页访问不受影响'
+                 : '当前未设置密钥，客户端留空即可对接');
+    } catch (e) { val.textContent = '读取失败'; }
+  }
+  const keyCopy = $('set-key-copy');
+  if (keyCopy && keyCopy.addEventListener) keyCopy.addEventListener('click', async () => {
+    const el = $('set-key-val');
+    const text = String(el.textContent || '');
+    if (!text || text.charAt(0) === '（' || text === '读取失败') return;
+    try { await navigator.clipboard.writeText(text); }
+    catch (e) {
+      // 非安全上下文或旧 WebView：退化成选中，让用户手动复制
+      try {
+        const rg = document.createRange(); rg.selectNodeContents(el);
+        const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(rg);
+      } catch (e2) { /* 选中也失败就算了 */ }
+    }
+    keyCopy.textContent = '已复制';
+    setTimeout(() => { keyCopy.textContent = '复制'; }, 1500);
+  });
+  const keyGen = $('set-key-gen');
+  if (keyGen && keyGen.addEventListener) keyGen.addEventListener('click', async () => {
+    if (!window.confirm('重新生成后，已配置的客户端需要重新填写新密钥。继续？')) return;
+    keyGen.disabled = true;
+    try {
+      const r = await fetch('/api/access-key/regenerate', { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok || !d.ok) window.alert(d.error || '生成失败');
+      else await paintAccessKey();
+    } catch (e) { window.alert('生成失败：' + e.message); }
+    keyGen.disabled = false;
+  });
+
   function openSettings() {
     show('settings');
+    paintAccessKey();        // 每次进设置页刷新一次密钥显示
     audioSummary();          // 「音质 · 预设」每次进来刷一次
     paintAccount();
     paintMebg();             // 「主页背景」的来源（自定义 / 网易云 / 默认渐变）同理
@@ -6033,7 +6098,11 @@
     if (!sec || !row) return;
     const seq = ++hallQuickSeq;
     sec.hidden = false;
-    row.innerHTML = '<span class="hq-tip">正在读取歌单…</span>';
+    /* 骨架屏：与实际卡片同尺寸，避免数据回来时整行高度突变（CLS） */
+    row.innerHTML = Array.from({ length: 6 }).map(() =>
+      '<div class="hq-card hq-card--sk" aria-hidden="true">' +
+      '<div class="hq-card__cover"></div>' +
+      '<span class="hq-card__name">&nbsp;</span><span class="hq-card__sub">&nbsp;</span></div>').join('');
     if (note) note.textContent = '';
 
     const logged = !!(profile && profile.userId);
@@ -6053,10 +6122,12 @@
 
     const cards = [];
     if (like) cards.push({ p: like, badge: '红心' });
-    else cards.push({ disabled: true, badge: '红心', name: '红心歌单', sub: logged ? '没找到「我喜欢的音乐」' : '登录后可见' });
+    else cards.push({ disabled: true, badge: '红心', name: '红心歌单',
+      sub: logged ? '没找到「我喜欢的音乐」' : '去设置登录', action: logged ? null : 'account' });
 
     subs.slice(0, 8).forEach((p) => cards.push({ p, badge: '收藏' }));
-    if (!subs.length) cards.push({ disabled: true, badge: '收藏', name: '收藏歌单', sub: logged ? '还没有收藏的歌单' : '登录后可见' });
+    if (!subs.length) cards.push({ disabled: true, badge: '收藏', name: '收藏歌单',
+      sub: logged ? '还没有收藏的歌单' : '去设置登录', action: logged ? null : 'account' });
 
     mine.slice(0, 8).forEach((p) => cards.push({ p, badge: '自建' }));
     cards.push({ hot: true, badge: '热歌', p: { id: HOT_PLAYLIST_ID, name: '热歌榜', cover: '', trackCount: 200 } });
@@ -6078,6 +6149,7 @@
       } else if (c.p && c.p.cover) {
         const im = document.createElement('img');
         im.loading = 'lazy'; im.decoding = 'async'; im.alt = '';
+        im.width = 256; im.height = 256;      // 显式尺寸：图片到位前就占好位
         im.src = API.img(c.p.cover, 256);
         cover.appendChild(im);
       }
@@ -6095,6 +6167,11 @@
 
       b.appendChild(cover); b.appendChild(name); b.appendChild(sub);
       if (!c.disabled) b.addEventListener('click', () => hqOpen(c.p));
+      else if (c.action === 'account') {
+        b.disabled = false;
+        b.classList.add('hq-card--cta');
+        b.addEventListener('click', () => { try { openAccountSettings(); } catch (e) { show('settings'); } });
+      }
       row.appendChild(b);
 
       // 热歌榜封面异步补（不阻塞首屏）
@@ -6115,6 +6192,18 @@
     if (note) note.textContent = logged
       ? `${lists.length} 张歌单 · 左右滑动`
       : '未登录 · 仅热歌榜可用';
+
+    /* 右侧渐隐只在真的能滑时出现，滑到底自动淡出 —— 给用户「还有更多」的暗示 */
+    const fade = () => {
+      const more = row.scrollWidth - row.clientWidth - row.scrollLeft > 8;
+      row.classList.toggle('is-more', more);
+      /* 同时给父节点打标记：老浏览器不支持 :has() 时渐隐依然生效 */
+      const sec = document.getElementById('hall-quick');
+      if (sec) sec.classList.toggle('is-more', more);
+    };
+    row.addEventListener('scroll', fade, { passive: true });
+    window.addEventListener('resize', fade, { passive: true });
+    requestAnimationFrame(fade);
   }
 
   async function openPlaylist(p) {
