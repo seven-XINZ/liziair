@@ -8650,3 +8650,10 @@ body.is-stage .updtoast { bottom: 18px; }
   .hq-card, .hq-card__cover { width: 104px; }
   .hq-card__cover { height: 104px; }
 }
+
+
+/* 平台图标行：横向手势归我们自己处理，纵向仍交给页面滚动（2026-11-19） */
+.pstrip__icons { touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+.pstrip__i { touch-action: pan-y; }
+/* 「我的」卡片轮播同理：左右滑切平台，上下滑仍是页面滚动 */
+#hall-me .me { touch-action: pan-y; }

@@ -12084,6 +12084,78 @@
         }
         applyHallTheme(pid, b);
       });
+
+      /* ------------------------------------------------------------------ *
+       * 平台左右循环滑动选择（2026-11-19）
+       * ------------------------------------------------------------------
+       * 两处都支持，且都是**循环**的（最后一个再往左滑回到第一个）：
+       *   1) 铺色态顶栏那排平台图标 .pstrip__icons → 直接切台（applyHallTheme）
+       *   2) 普通态「我的」卡片轮播 H.me → meGo(±1)，它本来就取模循环
+       * 判定：横向位移 > 26px 且大于纵向位移才算滑动；滑动后吞掉紧接着那次 click，
+       * 否则会被原有点击逻辑当成「点当前台」而退出铺色。未登录的台在循环里跳过。
+       * 键盘：焦点在图标行时 ←/→ 同样循环，方便桌面与无障碍。
+       * ================================================================== */
+      (() => {
+        const TH = 26;
+        const stripIcons = () => Array.prototype.slice
+          .call(H.platBar.querySelectorAll('.pstrip__i[data-plat]'))
+          .filter((b) => !b.classList.contains('is-off'));
+
+        function cycleStrip(dir) {
+          const list = stripIcons();
+          if (list.length < 2) return false;
+          let cur = list.findIndex((b) => b.dataset.plat === platMode);
+          if (cur < 0) cur = dir > 0 ? -1 : 0;
+          const target = list[(cur + dir + list.length) % list.length];
+          if (!target) return false;
+          try { target.focus({ preventScroll: true }); } catch (e) { /* 老环境 */ }
+          applyHallTheme(target.dataset.plat, target);
+          return true;
+        }
+
+        /* 通用滑动手势：起手区域由 inZone 判定，命中后回调 */
+        function bindSwipe(root, inZone, onSwipe) {
+          if (!root) return;
+          let sx = 0, sy = 0, on = false, ate = false;
+          root.addEventListener('pointerdown', (e) => {
+            on = !!(e.target && e.target.closest && inZone(e.target));
+            if (!on) return;
+            sx = e.clientX; sy = e.clientY;
+          }, { passive: true });
+          root.addEventListener('pointerup', (e) => {
+            if (!on) return;
+            on = false;
+            const dx = e.clientX - sx, dy = e.clientY - sy;
+            if (Math.abs(dx) < TH || Math.abs(dx) <= Math.abs(dy)) return;
+            if (onSwipe(dx < 0 ? 1 : -1)) {
+              ate = true;
+              setTimeout(() => { ate = false; }, 400);   // 没有后续 click 时也要复位
+            }
+          }, { passive: true });
+          root.addEventListener('pointercancel', () => { on = false; }, { passive: true });
+          /* 捕获阶段吞掉滑动后的那次 click，早于原有冒泡处理 */
+          root.addEventListener('click', (e) => {
+            if (!ate) return;
+            ate = false;
+            e.stopPropagation();
+            e.preventDefault();
+          }, true);
+        }
+
+        bindSwipe(H.platBar, (t) => t.closest('.pstrip__icons'), cycleStrip);
+        bindSwipe(H.me, (t) => t.closest('.me'), (dir) => {
+          if (!meCards || meCards.length < 2) return false;
+          meGo(dir);
+          return true;
+        });
+
+        H.platBar.addEventListener('keydown', (e) => {
+          if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+          if (!e.target.closest || !e.target.closest('.pstrip__icons')) return;
+          e.preventDefault();
+          cycleStrip(e.key === 'ArrowRight' ? 1 : -1);
+        });
+      })();
       /* 工具箱每一项自己绑了动作（见 paintTools），这里不再统一处理。
          「我的」卡是重画的，所以箭头/登录按钮都走事件委托，不逐次绑。 */
       H.me.addEventListener('click', (e) => {

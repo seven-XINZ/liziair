@@ -80,6 +80,7 @@ docker compose up -d --build
 - **歌词**：支持 **YRC 逐字歌词**与 LRC 两种格式（见下节）
 - **播放**：队列播放、上一首/下一首、顺序 / 单曲循环 / 随机；空格键暂停/播放
 - **进度条 / 音量条**：可拖拽，也支持左右方向键（Shift 加速）
+- **手势切换**：铺色态顶栏平台图标行与「我的」卡片轮播支持左右滑动循环切换（最后一个再滑回到第一个），未登录的台在循环里跳过；焦点在图标行时 ←/→ 方向键同样循环；纵向滑动仍归页面滚动
 - **PWA 可安装**：自带 `manifest.webmanifest` 与 Service Worker（`sw.js`），可装到主屏幕；页面 / JS / CSS 网络优先（改完刷新即生效），图标 / 字体 / 图片缓存优先，接口与音频流一律直连、不进缓存
 - **锁屏 / 控制中心媒体控制**：`pwa.js` 通过 Media Session 上报歌名、歌手、封面、进度，并绑定播放 / 暂停 / 上一首 / 下一首 / 拖动进度；部分 iOS 版本会把 ±10 秒按钮顶掉切歌键，iOS 上显式注销快进快退、保留上下曲
 - **iOS 后台播放健壮性**：iOS 主动绕开 Web Audio 音频图（元素原生出声，避免后台挂起 AudioContext 导致无声、被静音键掐断）；锁屏 / 后台恢复时走「直接重试 → 重取当前曲直链 → 标记待恢复，等回前台 / 手势再试」的恢复阶梯，接住 `play()` 被拒的 Promise，避免点播放静默失败
@@ -300,7 +301,8 @@ liziair/
 ├── services/           各音源边车（网易云 / QQ / 酷狗 / 酷我 / 汽水 / 波点 / 七舍 / Spotify）
 ├── .session.json       登录态（自动生成，别外传）
 └── public/
-    ├── index.html      结构 + 内联 SVG 图标库（无 emoji），引入 manifest 与 pwa.js
+    ├── index.html      桌面版结构 + 内联 SVG 图标库（无 emoji），引入 manifest 与 pwa.js
+    ├── m/index.html    移动版壳页面，同样引入 PWA 与首页歌单直达区
     ├── manifest.webmanifest  PWA 清单（名称 / 主题色 / 图标 / standalone）
     ├── sw.js           Service Worker：网络优先 + 静态资源缓存优先，接口与音频直连
     ├── pwa.js          SW 注册 / Media Session 锁屏控制 / iOS 后台自愈与提示
@@ -309,7 +311,7 @@ liziair/
     ├── api.js          前端 API 层（封面走 /api/img 代理，绕开防盗链）
     ├── beat.js         节拍检测：起音检测 / 自相关测速 / 拍相位 / 频谱（iOS 绕开 Web Audio）
     ├── player.js       播放引擎：队列 / YRC+LRC 解析 / 演示音轨合成 / 封面包彩 / 播放恢复阶梯
-    ├── app.js          UI 装配：视图切换、歌词面板、节拍器、登录、歌单、搜索、拖拽
+    ├── app.js          UI 装配：视图切换、歌词面板、节拍器、登录、歌单、搜索、拖拽、平台行循环滑动手势
     ├── audio/glide.js  交叉淡化与 Web Audio 能力探测（不可用时回退普通切歌）
     └── assets/         液态玻璃引擎（liquid-glass.js + .css）与 PWA 图标（icons/）
 ```
