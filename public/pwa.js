@@ -25,6 +25,12 @@
   }
 
   /* ---------- 2. Media Session（锁屏 / 控制中心 / 耳机键） ---------- */
+  /* iOS 判定：锁屏按钮与封面尺寸都要按它分流 */
+  const IS_IOS = (() => {
+    const ua = navigator.userAgent || '';
+    return /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  })();
+
   const ms = navigator.mediaSession;
   const P = window.Player;
   if (!ms || !P || typeof P.on !== 'function') return;
@@ -70,7 +76,10 @@
   function setMetadata(track) {
     if (!track || typeof window.MediaMetadata !== 'function') return;
     const art = [];
-    [96, 192, 256, 384, 512].forEach((s) => {
+    /* iOS 只用第一张，且大于 128x128 会被替换成灰块 —— 所以 iOS 把 96/128 放最前；
+       其它平台给全尺寸，让系统自己挑清晰的。 */
+    const sizes = IS_IOS ? [96, 128, 192, 256, 384, 512] : [512, 384, 256, 192, 128, 96];
+    sizes.forEach((s) => {
       const u = coverUrl(track, s);
       if (u) art.push({ src: u, sizes: s + 'x' + s, type: 'image/jpeg' });
     });
@@ -96,7 +105,7 @@
     } catch { /* 某些 iOS 版本不支持，忽略 */ }
   }
 
-  P.on('trackchange', ({ track }) => { lastTrack = track; setMetadata(track); setPosition(); pushNative(); });
+  P.on('trackchange', ({ track }) => { lastTrack = track; setMetadata(track); setPosition(); ensureTrackActions(); pushNative(); });
   P.on('playstate', (playing) => {
     try { ms.playbackState = playing ? 'playing' : 'paused'; } catch { /* ignore */ }
     setPosition();
@@ -110,7 +119,14 @@
   });
 
   const act = (name, fn) => { try { ms.setActionHandler(name, fn); } catch { /* 该平台不支持这个动作 */ } };
-  act('play', () => { if (P.audio && P.audio.paused) P.toggle(); });
+  act('play', () => {
+    const el = P.audio;
+    if (!el || !el.paused) return;
+    /* 优先走播放器的恢复阶梯（重试 → 换直链 → 待恢复），
+       直接 toggle 在 iOS 锁屏场景会因 play() 被拒而静默失败。 */
+    if (typeof P.resume === 'function') P.resume();
+    else P.toggle();
+  });
   act('pause', () => { if (P.audio && !P.audio.paused) P.toggle(); });
   act('previoustrack', () => { try { P.prev(); } catch { /* ignore */ } });
   act('nexttrack', () => { try { P.next(); } catch { /* ignore */ } });
@@ -118,16 +134,32 @@
     if (!P.audio || !d || typeof d.seekTime !== 'number') return;
     try { P.audio.currentTime = Math.max(0, d.seekTime); setPosition(); } catch { /* ignore */ }
   });
-  act('seekbackward', (d) => {
-    if (!P.audio) return;
-    const step = (d && d.seekOffset) || 10;
-    try { P.audio.currentTime = Math.max(0, P.audio.currentTime - step); setPosition(); } catch { /* ignore */ }
-  });
-  act('seekforward', (d) => {
-    if (!P.audio) return;
-    const step = (d && d.seekOffset) || 10;
-    try { P.audio.currentTime = Math.min(P.audio.duration || 1e9, P.audio.currentTime + step); setPosition(); } catch { /* ignore */ }
-  });
+  /* iOS 的取舍：注册了 seekbackward/seekforward，锁屏就会用 ±10 秒按钮
+     **替换掉**上一曲/下一曲（Apple 的设计，不是 bug）。用户要的是切歌，
+     所以 iOS 上显式注销这两个动作，把上一曲/下一曲换回来；
+     进度拖动仍然可用（seekto 不受影响）。桌面/安卓保留 ±10 秒。 */
+  if (IS_IOS) {
+    act('seekbackward', null);
+    act('seekforward', null);
+  } else {
+    act('seekbackward', (d) => {
+      if (!P.audio) return;
+      const step = (d && d.seekOffset) || 10;
+      try { P.audio.currentTime = Math.max(0, P.audio.currentTime - step); setPosition(); } catch { /* ignore */ }
+    });
+    act('seekforward', (d) => {
+      if (!P.audio) return;
+      const step = (d && d.seekOffset) || 10;
+      try { P.audio.currentTime = Math.min(P.audio.duration || 1e9, P.audio.currentTime + step); setPosition(); } catch { /* ignore */ }
+    });
+  }
+
+  /* iOS 偶发会在换歌后丢掉动作处理器，换歌时补注册一次（幂等，桌面也无害） */
+  function ensureTrackActions() {
+    act('previoustrack', () => { try { P.prev(); } catch (e) {} });
+    act('nexttrack', () => { try { P.next(); } catch (e) {} });
+    if (IS_IOS) { act('seekbackward', null); act('seekforward', null); }
+  }
 
   /* ---------- 3. iOS 偶发"逻辑在播、元素停了"的自愈 ---------- */
   document.addEventListener('visibilitychange', () => {
@@ -137,7 +169,8 @@
     const shouldPlay = P.state && P.state.playing;
     if (shouldPlay && el.paused) {
       // 只在"本该在播"时补一次，绝不覆盖用户主动暂停
-      el.play().catch(() => { /* 需要手势时不强求 */ });
+      if (typeof P.resume === 'function') P.resume();
+      else el.play().catch(() => { /* 需要手势时不强求 */ });
     }
     setPosition();
   });

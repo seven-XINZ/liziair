@@ -1057,6 +1057,73 @@ const Player = (() => {
   bindDeck(deckB);
 
   /* ------------------------------------------------------------------ *
+   * 播放恢复（修「锁屏暂停后点播放没反应」）
+   * ------------------------------------------------------------------
+   * 旧 toggle() 里是裸的 audio.play()，没有 catch。iOS 从锁屏/后台恢复时
+   * play() 经常返回 rejected promise：
+   *   · NotAllowedError —— 后台页面里调用，用户激活已失效
+   *   · AbortError      —— 上一次 play 被打断
+   *   · NotSupportedError / el.error —— 直链 vkey 过期、缓冲被系统回收
+   * 没 catch 就是 unhandled rejection，静默失败：界面停在暂停态、一点声音没有。
+   *
+   * 恢复阶梯：直接重试 → 重新取当前曲直链再播（尽量保住播放位置）→ 标记待恢复，
+   * 等回到前台 / 页面重新可见 / 下一次用户手势再试。
+   * ================================================================== */
+  let pendingResume = false;
+
+  async function tryPlay() {
+    try { await audio.play(); pendingResume = false; return true; }
+    catch (e) { return false; }
+  }
+
+  async function recoverPlayback() {
+    if (!audio.src) {
+      if (state.queue.length) return load(Math.max(0, state.index));
+      return false;
+    }
+    if (await tryPlay()) return true;
+
+    // 直链可能过期或缓冲被回收：重新 load 当前曲拿新地址
+    if (state.queue.length && state.index >= 0) {
+      const at = audio.currentTime || 0;
+      try {
+        await load(state.index, true);
+        if (at > 1) {
+          // 位置尽量保住：等元数据就绪再跳，失败就从头播（总比没声音好）
+          const seekBack = () => {
+            try {
+              if (isFinite(audio.duration) && audio.duration > at) audio.currentTime = at;
+            } catch (e) { /* 跳不了就从头 */ }
+          };
+          if (audio.readyState >= 1) seekBack();
+          else audio.addEventListener('loadedmetadata', seekBack, { once: true });
+        }
+        if (await tryPlay()) return true;
+      } catch (e) { /* 落到待恢复 */ }
+    }
+    pendingResume = true;
+    return false;
+  }
+
+  /* 回到前台 / 页面重新可见 / 窗口重新获焦时，把待恢复的播放补上 */
+  function flushPendingResume() {
+    if (!pendingResume) return;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    recoverPlayback();
+  }
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') flushPendingResume();
+    });
+    document.addEventListener('pageshow', flushPendingResume);
+  }
+  if (typeof window !== 'undefined') {
+    window.addEventListener('focus', flushPendingResume);
+    // 用户下一次任意点击也算一次激活机会
+    window.addEventListener('pointerdown', flushPendingResume, { passive: true });
+  }
+
+  /* ------------------------------------------------------------------ *
    * 对外 API
    * ------------------------------------------------------------------ */
   function next(auto = false) {
@@ -1110,8 +1177,18 @@ const Player = (() => {
     toggle() {
       cancelGlide('toggle');
       if (!audio.src) { if (state.queue.length) load(Math.max(0, state.index)); return; }
-      if (audio.paused) { Beat.resume(); audio.play(); } else audio.pause();
+      if (audio.paused) {
+        Beat.resume();
+        /* 必须接住 rejection：iOS 锁屏恢复时 play() 常被拒，
+           裸调用会静默失败（就是「点播放没反应」那个 bug）。 */
+        const pr = audio.play();
+        if (pr && typeof pr.catch === 'function') pr.catch(() => { recoverPlayback(); });
+      } else audio.pause();
     },
+
+    /** 外部（锁屏控制 / PWA 层）请求恢复播放：带完整恢复阶梯 */
+    resume() { return recoverPlayback(); },
+    get pendingResume() { return pendingResume; },
 
     seek(sec) {
       if (!isFinite(sec)) return;

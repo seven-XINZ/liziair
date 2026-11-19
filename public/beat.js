@@ -44,7 +44,32 @@ const Beat = (() => {
   let graphSent = false;
   let freq = null, timeArr = null;
   let prevSpec = null;
-  let failed = false;               // Web Audio 不可用时降级成"无节拍"，不影响播放
+  /* ------------------------------------------------------------------ *
+   * iOS 必须绕开 Web Audio 图（否则锁屏/切后台就没声音）
+   * ------------------------------------------------------------------
+   * 原因：一旦对 <audio> 调过 createMediaElementSource，它的输出就被接进
+   * AudioContext，扬声器声由 ctx.destination 出。而 iOS 在页面进后台/锁屏时
+   * 会挂起 AudioContext —— 元素还在"播"、进度还在走，但一点声音都没有。
+   * 而且经 Web Audio 出的声在 iOS 上被当作 ambient，连侧边静音键都能把它掐掉。
+   *
+   * 处理：iOS 上直接走项目既有的"无 Web Audio"降级路径（failed=true）：
+   *   · 不建 MediaElementSource，<audio> 原生出声 → 锁屏/切后台继续播，走媒体音量
+   *   · deckGain 返回 null，交叉淡化按 glide.capability() 的既有回退置灰
+   *   · 频谱/BPM 可视化在 iOS 上降级（这是代价，换来后台能听）
+   * 桌面/安卓不受影响，仍然走完整的音频图。
+   * ================================================================== */
+  const IOS_DEVICE = (() => {
+    try {
+      const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
+      const plat = (typeof navigator !== 'undefined' && navigator.platform) || '';
+      const touch = (typeof navigator !== 'undefined' && navigator.maxTouchPoints) || 0;
+      return /iPad|iPhone|iPod/.test(ua) || (plat === 'MacIntel' && touch > 1);
+    } catch (e) { return false; }
+  })();
+  let failed = IOS_DEVICE;          // Web Audio 不可用（或 iOS 主动绕开）时降级成"无节拍"，不影响播放
+  const failedReason = IOS_DEVICE
+    ? 'iOS 上为保证锁屏/后台继续播放，已绕开 Web Audio 音频图，交叉淡化不可用'
+    : 'Web Audio 初始化失败，已回退普通切歌';
 
   const env = new Float32Array(HISTORY);   // 环形：起音强度
   let envIdx = 0, envFilled = 0;
@@ -595,6 +620,8 @@ const Beat = (() => {
     state,
     get available() { return !failed && !!analyser; },
     get audioFailed() { return failed; },
+    get audioFailedReason() { return failedReason; },
+    get iosDirectAudio() { return IOS_DEVICE; },
     get context() { return ctx; },
     get spectrum() { return freq; },
     // 给单测用（node tempo-unit.mjs）：把纯计算部分暴露出去

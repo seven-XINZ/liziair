@@ -1,6 +1,6 @@
 # LIZI · 粒子播放器
 
-用折射型玻璃引擎做的歌词演出器：**可登录你自己的音乐平台账号**，拉真实歌单、真实歌词、真实播放地址。
+用折射型玻璃引擎做的歌词演出器：**可登录你自己的音乐平台账号**，拉真实歌单、真实歌词、真实播放地址。聚合网易云 / QQ / 酷狗 / 酷我 / 汽水 / 波点 / 七舍 / Spotify 等多路音源，自带可安装的 **PWA** 与锁屏媒体控制。
 
 ![播放中](public/site/img/03-now-playing.png)
 
@@ -80,6 +80,9 @@ docker compose up -d --build
 - **歌词**：支持 **YRC 逐字歌词**与 LRC 两种格式（见下节）
 - **播放**：队列播放、上一首/下一首、顺序 / 单曲循环 / 随机；空格键暂停/播放
 - **进度条 / 音量条**：可拖拽，也支持左右方向键（Shift 加速）
+- **PWA 可安装**：自带 `manifest.webmanifest` 与 Service Worker（`sw.js`），可装到主屏幕；页面 / JS / CSS 网络优先（改完刷新即生效），图标 / 字体 / 图片缓存优先，接口与音频流一律直连、不进缓存
+- **锁屏 / 控制中心媒体控制**：`pwa.js` 通过 Media Session 上报歌名、歌手、封面、进度，并绑定播放 / 暂停 / 上一首 / 下一首 / 拖动进度；部分 iOS 版本会把 ±10 秒按钮顶掉切歌键，iOS 上显式注销快进快退、保留上下曲
+- **iOS 后台播放健壮性**：iOS 主动绕开 Web Audio 音频图（元素原生出声，避免后台挂起 AudioContext 导致无声、被静音键掐断）；锁屏 / 后台恢复时走「直接重试 → 重取当前曲直链 → 标记待恢复，等回前台 / 手势再试」的恢复阶梯，接住 `play()` 被拒的 Promise，避免点播放静默失败
 
 ---
 
@@ -263,6 +266,7 @@ POST /api/song/play/about/block/page   { songId }
 - **封面取色**依赖 `<canvas>` 读像素，必须走同源代理（`/api/img`）。
   直接用平台原图会因缺 CORS 头污染画布，`getImageData` 抛 `SecurityError`。
 - 网易云扫码通道偶尔会被上游风控挑中，此时改用同一弹窗里的 `MUSIC_U` Cookie 登录。
+- **iOS 后台播放取舍**：为保证锁屏 / 切后台继续出声，iOS 上绕开 Web Audio 音频图、由 `<audio>` 原生出声；代价是交叉淡化、实时频谱 / BPM 可视化在 iOS 上降级（桌面 / 安卓不受影响）。iOS 的「添加到主屏幕」standalone 模式在部分系统版本上后台音频仍可能被挂起，建议留在 Safari 标签页里播放；`pwa.js` 会据此给出可关闭的提示。
 
 ---
 
@@ -285,23 +289,29 @@ POST /api/song/play/about/block/page   { songId }
 ## 文件
 
 ```
-music-player/
-├── server.mjs          零依赖服务端：weapi 加密 / 二维码登录 / cookie 落盘 / 静态托管
+liziair/
+├── server.mjs          零依赖主服务：weapi 加密 / 二维码登录 / cookie 落盘 / 静态托管
+├── wallpaper-api.mjs   Wallpaper Engine 壁纸同源接口（元数据 / 视频字节流 Range / 预览）
 ├── start.cmd           双击启动
 ├── Dockerfile          多阶段单容器镜像构建（上下文 = 仓库根）
 ├── docker-compose.yml  compose 编排示例（卷 /data、探活、日志与资源限制）
 ├── docker-entrypoint.sh 容器启动入口：按指纹同步边车到 /data 卷，保留登录态
 ├── docker/             Docker 部署说明与 nginx 反代示例
+├── services/           各音源边车（网易云 / QQ / 酷狗 / 酷我 / 汽水 / 波点 / 七舍 / Spotify）
 ├── .session.json       登录态（自动生成，别外传）
 └── public/
-    ├── index.html      结构 + 内联 SVG 图标库（无 emoji）
+    ├── index.html      结构 + 内联 SVG 图标库（无 emoji），引入 manifest 与 pwa.js
+    ├── manifest.webmanifest  PWA 清单（名称 / 主题色 / 图标 / standalone）
+    ├── sw.js           Service Worker：网络优先 + 静态资源缓存优先，接口与音频直连
+    ├── pwa.js          SW 注册 / Media Session 锁屏控制 / iOS 后台自愈与提示
     ├── tokens.css      设计令牌：字体 / 字号 / 间距 / OKLCH 色板 / 动效
     ├── app.css         布局与排版（玻璃表面样式来自引擎的 .lg-surface）
     ├── api.js          前端 API 层（封面走 /api/img 代理，绕开防盗链）
-    ├── beat.js         节拍检测：起音检测 / 自相关测速 / 拍相位 / 频谱
-    ├── player.js       播放引擎：队列 / YRC+LRC 解析 / 演示音轨合成 / 封面包彩提取
+    ├── beat.js         节拍检测：起音检测 / 自相关测速 / 拍相位 / 频谱（iOS 绕开 Web Audio）
+    ├── player.js       播放引擎：队列 / YRC+LRC 解析 / 演示音轨合成 / 封面包彩 / 播放恢复阶梯
     ├── app.js          UI 装配：视图切换、歌词面板、节拍器、登录、歌单、搜索、拖拽
-    └── assets/         液态玻璃引擎（liquid-glass.js + .css）
+    ├── audio/glide.js  交叉淡化与 Web Audio 能力探测（不可用时回退普通切歌）
+    └── assets/         液态玻璃引擎（liquid-glass.js + .css）与 PWA 图标（icons/）
 ```
 
 ---

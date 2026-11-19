@@ -104,7 +104,7 @@ const Glide = (() => {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return { ok: false, reason: '浏览器不支持 Web Audio（AudioContext），无法做双轨交叉淡化' };
     if (typeof Beat !== 'undefined' && Beat.audioFailed) {
-      return { ok: false, reason: 'Web Audio 初始化失败，已回退普通切歌' };
+      return { ok: false, reason: (typeof Beat !== 'undefined' && Beat.audioFailedReason) || 'Web Audio 初始化失败，已回退普通切歌' };
     }
     return { ok: true, reason: '' };
   }
