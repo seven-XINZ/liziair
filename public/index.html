@@ -229,6 +229,18 @@
                      面板收短；四个入口改成面板外、窗口内左侧留白里的竖排图标键
                      （歌曲 / 形态长廊 / 我的专辑 / 工具箱，音乐实验室并入工具箱）。
          2026-11-06：「本日推荐」区块和下滑的「推荐歌单」已删除，大厅不再做下滑页。 -->
+    <!-- 账号歌单直达：红心 / 收藏 / 自建 / 热歌榜。
+         由 app.js 的 paintHallQuick() 填充；未登录时只显示热歌榜。
+         2026-11-19 新增：以前要「先点平台方块 → 再切喜欢/收藏」才看得到，
+         现在首页直接露出，横向滑动，点一张即进歌单。 -->
+    <section class="hall-quick" id="hall-quick" hidden>
+      <div class="hall-quick__head">
+        <span class="hall-quick__title">我的歌单</span>
+        <span class="hall-quick__note" id="hall-quick-note"></span>
+      </div>
+      <div class="hall-quick__row" id="hall-quick-row"></div>
+    </section>
+
     <div class="hall-rail" id="hall-rail">
       <!-- 入口行：形态长廊 / 我的专辑 / 音乐实验室 / 工具箱，四张平级卡片排一行。
            2026-11-06 由「细线文字行」改成卡片：左上 SVG 图标砖、右上序号、底部名字 + 说明。

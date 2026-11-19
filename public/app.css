@@ -8606,3 +8606,47 @@ body.is-stage .updtoast { bottom: 18px; }
 @media (prefers-reduced-motion: reduce) {
   .updmodal, .updmodal__card { animation: none; }
 }
+
+
+/* ---------- 首页「我的歌单」直达（2026-11-19）----------
+   .hall 是竖向 flex，这里必须 flex:0 0 auto，否则会抢走铺色态面板的高度。 */
+.hall-quick { flex: 0 0 auto; margin: 0 0 var(--sp-3); }
+.hall-quick__head { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; }
+.hall-quick__title { font-size: 13px; font-weight: 600; letter-spacing: .02em; }
+.hall-quick__note { font-size: 11px; opacity: .58; }
+.hall-quick__row {
+  display: flex; gap: 10px; overflow-x: auto; overflow-y: hidden;
+  scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch;
+  padding: 2px 0 6px;
+}
+.hall-quick__row::-webkit-scrollbar { height: 0; }
+.hq-tip { font-size: 12px; opacity: .6; padding: 6px 0; }
+.hq-card {
+  flex: 0 0 auto; width: 128px; scroll-snap-align: start;
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 0; border: 0; background: none; color: inherit;
+  text-align: left; cursor: pointer; font: inherit;
+}
+.hq-card__cover {
+  position: relative; width: 128px; height: 128px; border-radius: 12px; overflow: hidden;
+  background: linear-gradient(140deg, rgba(255,255,255,.10), rgba(255,255,255,.03));
+}
+.hq-card__cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.hq-card--hot .hq-card__cover { background: linear-gradient(140deg, #ff6a3d, #ff2d78); }
+.hq-card__flame { position: absolute; inset: 0; display: grid; place-items: center; font-size: 34px; }
+.hq-card__badge {
+  position: absolute; left: 6px; top: 6px; font-size: 10px; line-height: 1.4;
+  padding: 2px 6px; border-radius: 6px; color: #fff;
+  background: rgba(0,0,0,.55); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.hq-card__name {
+  font-size: 12px; line-height: 1.35; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.hq-card__sub { font-size: 10.5px; opacity: .58; }
+.hq-card[disabled] { opacity: .45; cursor: default; }
+.hq-card:not([disabled]):hover .hq-card__cover { outline: 1px solid rgba(255,255,255,.28); }
+@media (max-width: 520px) {
+  .hq-card, .hq-card__cover { width: 104px; }
+  .hq-card__cover { height: 104px; }
+}

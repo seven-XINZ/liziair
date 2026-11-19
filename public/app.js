@@ -271,7 +271,7 @@
     /* 离开实验室（大厅 / 搜索 / 播放页 / 形态页）时，自动过渡的演示音源要立刻停，
        不能让它自己响完 —— 用户要的是「我走了就不该还有声音」。 */
     if (next !== 'lab' && labStopXfade) labStopXfade();
-    if (next === 'hall') Hall.mount();
+    if (next === 'hall') { Hall.mount(); paintHallQuick(); }
     /* 离开大厅：吸底卡的 scroll 监听要立刻摘掉（见 Hall.leave） */
     else Hall.leave();
     /* 工具箱整页：每次进来重画一次（数组驱动，条目少，innerHTML 最省心）；
@@ -6006,6 +6006,117 @@
   /* ================================================================== *
    * 歌单
    * ================================================================== */
+  /* ================================================================== *
+   * 首页「我的歌单」直达（2026-11-19）
+   * ------------------------------------------------------------------
+   * 以前要先点平台方块进铺色态、再切「喜欢 / 收藏」才看得到账号歌单。
+   * 这里在首页直接铺一排：红心（我喜欢的音乐）→ 收藏 → 自建 → 热歌榜。
+   * 未登录不编内容：红心/收藏给禁用占位并写明原因，热歌榜匿名可看。
+   * ================================================================== */
+  let hallQuickSeq = 0;
+  const HOT_PLAYLIST_ID = 3778678;      // 云音乐热歌榜（每日更新，匿名可读）
+
+  function hqOpen(p) {
+    try {
+      searchSource = 'netease';
+      localStorage.setItem('lizi.searchSource', 'netease');
+    } catch (e) { /* 隐私模式 */ }
+    try { paintSource(); } catch (e) { /* 尚未初始化 */ }
+    show('browse');
+    openPlaylist({ id: p.id, name: p.name, cover: p.cover || '', trackCount: p.trackCount || 0 });
+  }
+
+  async function paintHallQuick() {
+    const sec = document.getElementById('hall-quick');
+    const row = document.getElementById('hall-quick-row');
+    const note = document.getElementById('hall-quick-note');
+    if (!sec || !row) return;
+    const seq = ++hallQuickSeq;
+    sec.hidden = false;
+    row.innerHTML = '<span class="hq-tip">正在读取歌单…</span>';
+    if (note) note.textContent = '';
+
+    const logged = !!(profile && profile.userId);
+    let lists = [];
+    if (logged) {
+      try {
+        const d = await API.userPlaylists(profile.userId);
+        lists = (d && d.playlists) || [];
+      } catch (e) { lists = []; }
+    }
+    if (seq !== hallQuickSeq) return;      // 快速切视图时丢弃过期结果
+
+    const like = lists.find((p) => p.specialType === 5)
+      || lists.find((p) => /喜欢的音乐/.test(p.name || ''));
+    const subs = lists.filter((p) => p.subscribed && (!like || p.id !== like.id));
+    const mine = lists.filter((p) => !p.subscribed && (!like || p.id !== like.id));
+
+    const cards = [];
+    if (like) cards.push({ p: like, badge: '红心' });
+    else cards.push({ disabled: true, badge: '红心', name: '红心歌单', sub: logged ? '没找到「我喜欢的音乐」' : '登录后可见' });
+
+    subs.slice(0, 8).forEach((p) => cards.push({ p, badge: '收藏' }));
+    if (!subs.length) cards.push({ disabled: true, badge: '收藏', name: '收藏歌单', sub: logged ? '还没有收藏的歌单' : '登录后可见' });
+
+    mine.slice(0, 8).forEach((p) => cards.push({ p, badge: '自建' }));
+    cards.push({ hot: true, badge: '热歌', p: { id: HOT_PLAYLIST_ID, name: '热歌榜', cover: '', trackCount: 200 } });
+
+    row.innerHTML = '';
+    cards.forEach((c) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'hq-card' + (c.hot ? ' hq-card--hot' : '');
+      if (c.disabled) b.disabled = true;
+
+      const cover = document.createElement('div');
+      cover.className = 'hq-card__cover';
+      if (c.hot) {
+        const f = document.createElement('span');
+        f.className = 'hq-card__flame';
+        f.textContent = '🔥';
+        cover.appendChild(f);
+      } else if (c.p && c.p.cover) {
+        const im = document.createElement('img');
+        im.loading = 'lazy'; im.decoding = 'async'; im.alt = '';
+        im.src = API.img(c.p.cover, 256);
+        cover.appendChild(im);
+      }
+      const badge = document.createElement('span');
+      badge.className = 'hq-card__badge';
+      badge.textContent = c.badge;
+      cover.appendChild(badge);
+
+      const name = document.createElement('span');
+      name.className = 'hq-card__name';
+      name.textContent = c.disabled ? c.name : (c.p.name || '歌单');
+      const sub = document.createElement('span');
+      sub.className = 'hq-card__sub';
+      sub.textContent = c.disabled ? c.sub : `${c.p.trackCount || 0} 首`;
+
+      b.appendChild(cover); b.appendChild(name); b.appendChild(sub);
+      if (!c.disabled) b.addEventListener('click', () => hqOpen(c.p));
+      row.appendChild(b);
+
+      // 热歌榜封面异步补（不阻塞首屏）
+      if (c.hot) {
+        API.playlistDetail(HOT_PLAYLIST_ID).then((d) => {
+          const cv = d && d.playlist && d.playlist.cover;
+          if (!cv || seq !== hallQuickSeq) return;
+          const im = document.createElement('img');
+          im.loading = 'lazy'; im.alt = '';
+          im.src = API.img(cv, 256);
+          im.addEventListener('load', () => { const f = cover.querySelector('.hq-card__flame'); if (f) f.remove(); });
+          cover.insertBefore(im, cover.firstChild);
+          if (d.playlist.trackCount) sub.textContent = `${d.playlist.trackCount} 首`;
+        }).catch(() => { /* 保留火焰占位 */ });
+      }
+    });
+
+    if (note) note.textContent = logged
+      ? `${lists.length} 张歌单 · 左右滑动`
+      : '未登录 · 仅热歌榜可用';
+  }
+
   async function openPlaylist(p) {
     el.playlists.querySelectorAll('.pl').forEach((b) => b.classList.toggle('is-active', +b.dataset.id === p.id));
     el.plName.textContent = p.name;
@@ -13708,6 +13819,7 @@
         const sub = lists.playlists.filter((p) => p.subscribed);
         renderPlaylists([...mine, ...sub]);
         Hall.refreshMe();
+        paintHallQuick();      // 首页歌单区：登录态到手后立刻铺上
       }
     } catch { /* 匿名可用 */ }
 
