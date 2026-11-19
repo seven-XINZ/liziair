@@ -17,6 +17,19 @@
   }
 })();
 </script>
+<script>
+/* 首屏尽早恢复字体选择：在 app.js 之前就读 localStorage['lizi.font'] 并打上
+   data-font，避免刷新时先用默认字体渲染一帧再跳变。白名单与 app.js 的 FONTS
+   一致；default 不写 data-font。 */
+(function () {
+  try {
+    var v = localStorage.getItem('lizi.font') || 'default';
+    if (['serif','mono','kuaile','kaiti','yuanti','heiti','songti'].indexOf(v) >= 0) {
+      document.documentElement.setAttribute('data-font', v);
+    }
+  } catch (e) { /* 隐私模式：忽略 */ }
+})();
+</script>
 <title>LIZI</title>
 <!-- PWA / iOS：可安装 + 锁屏媒体信息（见 pwa.js / sw.js） -->
 <link rel="manifest" href="/manifest.webmanifest">
@@ -27,11 +40,8 @@
 <meta name="apple-mobile-web-app-title" content="LIZI">
 <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
 <script src="/pwa.js" defer></script>
-<!-- Google Fonts 必须异步：这行以前是普通 stylesheet，字体站慢一点/连不上时，
-     它会一直挂住文档加载 —— 后面的 <script> 全部不执行，整页白屏（10-31 实测：
-     fonts 连不上时 readyState 卡在 loading 十几秒，LIZI_TOUR/app.js 都没跑起来；
-     把请求拦掉反而 344ms 就 complete）。media="print" + onload 换回来是标准写法，
-     字体拿到之后才应用，拿不到就用系统字体兜底，绝不阻塞启动。 -->
+<!-- 本地字体表：字体文件全部自托管在 /assets/fonts，零 CDN，连不上外网也不影响启动；
+     拉丁可变字重 + 中文子集按 unicode-range 分片，拿不到对应字形会逐字回退系统字体。 -->
 <link rel="stylesheet" href="assets/liquid-glass.css">
 <link rel="stylesheet" href="/fonts.css">
 <link rel="stylesheet" href="tokens.css">

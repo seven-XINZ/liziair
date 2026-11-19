@@ -8712,7 +8712,7 @@ html[data-font="serif"] {
 }
 /* 等宽：终端感 */
 html[data-font="mono"] {
-  --font-display: "JetBrains Mono", "Geist Mono", ui-monospace, Consolas, monospace;
+  --font-display: "JetBrains Mono", "Geist Mono", ui-monospace, "PingFang SC", Consolas, monospace;
   --font-body: "JetBrains Mono", "Geist Mono", ui-monospace, "PingFang SC", Consolas, monospace;
   --font-mono: "JetBrains Mono", "Geist Mono", ui-monospace, Consolas, monospace;
 }

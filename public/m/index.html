@@ -5,6 +5,18 @@
 <base href="/">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <title>LIZI</title>
+<script>
+/* 首屏尽早恢复字体选择：在 app.js 之前读 localStorage['lizi.font'] 并打
+   data-font，避免刷新先跑一帧默认字体。白名单与 app.js 的 FONTS 一致；default 不写。 */
+(function () {
+  try {
+    var v = localStorage.getItem('lizi.font') || 'default';
+    if (['serif','mono','kuaile','kaiti','yuanti','heiti','songti'].indexOf(v) >= 0) {
+      document.documentElement.setAttribute('data-font', v);
+    }
+  } catch (e) { /* 隐私模式：忽略 */ }
+})();
+</script>
 <!-- PWA / iOS：可安装 + 锁屏媒体信息（见 pwa.js / sw.js）
      2026-11-19：移动版此前没有引入 pwa.js，导致 iPhone 上锁屏没有歌名/封面/切歌键。 -->
 <link rel="manifest" href="/manifest.webmanifest">
