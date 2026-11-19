@@ -7948,9 +7948,10 @@
       const vis = platRowsVisible(list);
       const shown = (vis.length ? vis : list).filter((r) => r && r.loggedIn);
       if (!shown.length) return hallLoginHtml(checking);
-      /* 2026-11-08：有已登录平台就直接进铺色态，普通态不再画平台大色块。
-         旧网格（meGridHtml）留着但厅内不再调用。 */
-      return '';
+      /* 有已登录平台：普通态画平台方块网格作为入口；正常会由 restoreHallTheme
+         直接进入铺色态接管面板。保留网格同时作为兜底——铺色态因故没建立起来时，
+         普通态中间不会整块空白。 */
+      return meGridHtml(rows);
     }
 
     /* 「我的」容器跟着内容显隐：登录后内容为空时别在普通态留一条空内边距/分割线。 */
@@ -14054,19 +14055,4 @@
     }, BOOT_DELAY);
   })();
 
-  /* 设置 → 关于：QQ 群一行（桌面 / 安卓 / 浏览器都用同一份设置页）。
-     桌面壳没有通用 openExternal：window.open 会被主进程的
-     setWindowOpenHandler 转给系统浏览器；安卓壳直接走 __liziNative。 */
-  (function initQqGroupRow() {
-    const row = document.getElementById('set-qq-group');
-    if (!row) return;
-    const QQ_GROUP_URL = 'https://qm.qq.com/q/nITZnfZadc';
-    row.addEventListener('click', () => {
-      const native = window.__liziNative;
-      if (native && typeof native.openExternal === 'function') {
-        try { native.openExternal(QQ_GROUP_URL); return; } catch { /* 桥调用失败退回 window.open */ }
-      }
-      window.open(QQ_GROUP_URL, '_blank', 'noopener');
-    });
-  })();
 })();

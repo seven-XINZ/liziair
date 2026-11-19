@@ -46,10 +46,12 @@
 
   /** 统一取 JSON：带 AbortSignal 超时，非 2xx 抛错（由各 check 自己 catch） */
   async function getJson(path) {
-    const res = await fetch(path, {
-      signal: AbortSignal.timeout(STATUS_TIMEOUT),
-      cache: 'no-store',
-    });
+    let signal;
+    try {
+      signal = (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function')
+        ? AbortSignal.timeout(STATUS_TIMEOUT) : undefined;
+    } catch { signal = undefined; }
+    const res = await fetch(path, { signal, cache: 'no-store' });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     return res.json();
   }
