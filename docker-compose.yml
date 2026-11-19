@@ -1,0 +1,67 @@
+# ============================================================================
+# LIZI · docker compose（适配 1Panel / 群晖 / 飞牛这类 NAS 面板）
+#   docker compose up -d --build
+#
+# 从旧版 docker run 升级：把原来挂到 /app 的宿主机目录改挂到 /data，
+# 登录态与边车凭证原地保留（旧卷本来就是这套目录布局）。
+# ============================================================================
+services:
+  lizi:
+    image: liziair:latest
+    build:
+      context: .
+      args:
+        # 海外构建改成 https://registry.npmjs.org
+        NPM_REGISTRY: https://registry.npmmirror.com
+    container_name: liziair
+    restart: unless-stopped
+
+    # 僵尸回收由镜像内的 tini 负责（ENTRYPOINT 已是 tini）；
+    # 这里不再叠加 docker-init，避免两层 init 导致 tini 不再是 PID 1
+
+    ports:
+      - "8088:8088"
+
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8088"
+      TZ: Asia/Shanghai
+      LIZI_DATA_DIR: /data
+      LIZI_SERVICES_DIR: /data/services
+      # 创意站点目录（可选）：宿主机上有就挂进来，没有就留空
+      # CREATIVE_DIR: /creative
+
+    volumes:
+      # 左侧换成你 NAS 上的实际目录；首次使用请先 chown -R 1000:1000 该目录
+      - ./data:/data
+      # - /path/to/creative:/creative:ro
+
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8088/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+
+    # 边车需要一点时间收干净，别用默认 10s 直接 SIGKILL
+    stop_grace_period: 15s
+
+    security_opt:
+      - no-new-privileges:true
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # NAS 上建议给个上限，避免某个边车吃满内存把整机拖垮（按机器内存调整）
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 1536M
+
+    # 代码层已只读运行，想再收紧可打开下面两行（先确认边车不往 /app 写东西）
+    # read_only: true
+    # tmpfs:
+    #   - /tmp

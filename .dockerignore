@@ -23,3 +23,15 @@ dist/
 .scratch-*/
 .claude/
 __pycache__/
+
+# --- 构建上下文瘦身（以下内容 Dockerfile 都不 COPY，没必要传给 daemon）---
+desktop/
+build/
+docker/
+dist/
+release.mjs
+start.cmd
+package-lock.json
+*.md
+shots/
+public/site/download/

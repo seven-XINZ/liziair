@@ -26,7 +26,16 @@ import { handleWallpaper } from './wallpaper-api.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const SESSION_FILE = path.join(__dirname, '.session.json');
+/* 运行时状态目录。默认与代码同目录 —— 桌面版/本地跑的行为完全不变。
+   容器里用 LIZI_DATA_DIR 指到持久化卷，代码就能留在只读镜像层，
+   不必每次启动把 83MB 的 public/ 拷进卷。 */
+const DATA_DIR = process.env.LIZI_DATA_DIR ? path.resolve(process.env.LIZI_DATA_DIR) : __dirname;
+try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch { /* 只读或无权限时下面各写入点各自兜底 */ }
+const dataPath = (...seg) => path.join(DATA_DIR, ...seg);
+/* 边车根目录：边车把 .port/.log/.auth-* 写在自己目录里，所以容器里这一份要可写且持久。
+   默认仍是代码旁的 services/；容器用 LIZI_SERVICES_DIR 指到卷内副本。 */
+const SERVICES_DIR = process.env.LIZI_SERVICES_DIR ? path.resolve(process.env.LIZI_SERVICES_DIR) : path.join(__dirname, 'services');
+const SESSION_FILE = dataPath('.session.json');
 /* 创意网站目录（200 个自包含视觉实验）。
    不拷贝、不修改原文件 —— 直接按原路径只读提供，
    这样你在原目录里继续改，播放器永远放的是最新的。 */
@@ -37,7 +46,7 @@ const CREATIVE_DIR = process.env.CREATIVE_DIR || 'E:\\proiects\\OPode\\creative-
    端口被占用（或落在 Windows 保留段里）才退回系统分配。 */
 function preferredPort() {
   if (process.env.PORT) return Number(process.env.PORT);
-  const f = path.join(__dirname, '.port');
+  const f = dataPath('.port');
   try {
     const prev = Number(fs.readFileSync(f, 'utf8').trim());
     // 读完立刻删掉：start.cmd 靠"文件出现"判断服务起没起来，
@@ -187,7 +196,7 @@ try {
    网易云直接判「检测到当前设备环境异常，本次操作已经拦截」（扫码确认那一步）。
    这里持久化一份固定设备（每个安装一个 UUID），随 cookie 一起发出去。
    -------------------------------------------------------------------------- */
-const DEVICE_FILE = path.join(__dirname, '.netease-device.json');
+const DEVICE_FILE = dataPath('.netease-device.json');
 let deviceCache = null;
 function deviceCookie() {
   if (deviceCache) return deviceCache;
@@ -221,6 +230,7 @@ const cookieHeader = () => {
   return jar.join('; ');
 };
 
+let lastSessionSnapshot = null;
 function saveCookies(setCookie) {
   if (!setCookie) return;
   for (const line of setCookie) {
@@ -232,7 +242,15 @@ function saveCookies(setCookie) {
     if (v === '' || v === '""') delete cookies[k];
     else cookies[k] = v;
   }
-  fs.writeFileSync(SESSION_FILE, JSON.stringify(cookies, null, 2));
+  /* 只有真变了才落盘：搜索/歌词这类高频请求以前每次都在同步写文件。 */
+  const next = JSON.stringify(cookies, null, 2);
+  if (next === lastSessionSnapshot) return;
+  try {
+    fs.writeFileSync(SESSION_FILE, next);
+    lastSessionSnapshot = next;
+  } catch (e) {
+    console.warn('[server] 登录态写盘失败（不影响本次请求）：', String(e.message));
+  }
 }
 
 /* ==========================================================================
@@ -397,11 +415,29 @@ const BRIDGE_TAG = `<script>/* c100-live bridge */
 })();
 </script>`;
 
+/* 请求体上限：登录/搜索的 body 都是几百字节到几 KB，1MB 绰绰有余。
+   不设上限的话，一个持续上传的连接就能把内存吃光。 */
+const BODY_MAX_BYTES = 1024 * 1024;
 const readBody = (req) =>
-  new Promise((resolve) => {
+  new Promise((resolve, reject) => {
     let raw = '';
-    req.on('data', (c) => (raw += c));
-    req.on('end', () => { try { resolve(JSON.parse(raw || '{}')); } catch { resolve({}); } });
+    let size = 0;
+    let aborted = false;
+    req.on('data', (c) => {
+      if (aborted) return;
+      size += c.length;
+      if (size > BODY_MAX_BYTES) {
+        aborted = true;
+        raw = '';
+        const err = new Error('body too large');
+        err.statusCode = 413;
+        reject(err);
+        return;
+      }
+      raw += c;
+    });
+    req.on('end', () => { if (!aborted) { try { resolve(JSON.parse(raw || '{}')); } catch { resolve({}); } } });
+    req.on('error', () => { if (!aborted) resolve({}); });
   });
 
 /** 图片走这里代理：网易云的封面有防盗链，且 <img referrerpolicy> 不好控 */
@@ -416,6 +452,7 @@ const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 async function proxyImage(res, rawUrl) {
   let u;
   try { u = new URL(rawUrl); } catch { return json(res, 400, { error: 'bad url' }); }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return json(res, 400, { error: 'bad protocol' });
   const hostOk = (x) => IMAGE_HOSTS.has(x.hostname) || IMAGE_HOST_SUFFIX.some((s) => x.hostname.endsWith(s));
   if (!hostOk(u)) return json(res, 403, { error: 'host not allowed' });
   try {
@@ -459,7 +496,7 @@ async function proxyImage(res, rawUrl) {
    注意：QQ 的接口和网易云完全两套，字段名、分页、播放地址形状都不一样，
    所以这里是**翻译层**，不是透明转发。
    ========================================================================== */
-const QQ_DIR = path.join(__dirname, 'services', 'qq-api');
+const QQ_DIR = path.join(SERVICES_DIR, 'qq-api');
 const QQ_ENTRY = path.join(QQ_DIR, 'start.mjs');
 const QQ_PORT_FILE = path.join(QQ_DIR, '.port');
 const QQ_LOG_FILE = path.join(QQ_DIR, '.log');
@@ -1256,6 +1293,54 @@ function qqUserAlbum(it) {
  * 走本机代理的理由和封面一样：vkey 会过期、CDN 有 referer 策略，而且不该把凭证塞进 DOM。
  * 必须转发 Range，否则 <audio> 拖进度条会整段重下。
  */
+
+/* --------------------------------------------------------------------------
+   音频上游统一取数（QQ / 酷狗 / 汽水 / 波点 共用）
+   --------------------------------------------------------------------------
+   三件以前漏掉的事：
+     1. 连接超时：上游挂死时代理连接会永远不落地。这里只掐「拿到响应头」这一段，
+        拿到就清定时器 —— 长音频流不会被误杀。
+     2. 重定向复检：白名单内的 URL 可以 302 到任意主机，SSRF 防线必须对最终地址再验一次
+        （图片代理早就这么做了，音频这边以前漏了）。
+     3. 长度头：fetch 会自动解压，上游带 Content-Encoding 时原始 Content-Length 是压缩前
+        的字节数，照转发会让浏览器按错误长度截断或挂起。
+   ========================================================================== */
+async function fetchAudioUpstream(u, headers, hostOk) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(new Error('upstream connect timeout')), 15000);
+  let upstream;
+  try {
+    upstream = await fetch(u, { headers, redirect: 'follow', signal: ctl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+  let finalUrl = u;
+  try { finalUrl = new URL(upstream.url || u.href); } catch { /* 保持原地址 */ }
+  if (!hostOk(finalUrl)) {
+    try { upstream.body?.cancel(); } catch { /* 已经关了 */ }
+    const e = new Error('redirect host not allowed: ' + finalUrl.hostname);
+    e.statusCode = 403;
+    throw e;
+  }
+  return upstream;
+}
+
+/** 把上游音频响应转给客户端（长度头按解压情况修正） */
+function writeAudioHead(upstream, res) {
+  const out = {
+    'Content-Type': upstream.headers.get('content-type') || 'audio/mpeg',
+    'Cache-Control': 'no-store',
+    'Accept-Ranges': 'bytes',
+  };
+  const encoded = upstream.headers.get('content-encoding');
+  for (const k of ['content-length', 'content-range']) {
+    if (encoded && k === 'content-length') continue;   // 已解压，原长度不可信
+    const v = upstream.headers.get(k);
+    if (v) out[k] = v;
+  }
+  res.writeHead(upstream.status, out);
+}
+
 async function proxyQQAudio(req, res, url) {
   let u;
   try { u = new URL(url.searchParams.get('url') || ''); } catch { return json(res, 400, { error: 'bad url' }); }
@@ -1266,21 +1351,12 @@ async function proxyQQAudio(req, res, url) {
   const headers = { 'User-Agent': 'Mozilla/5.0', Referer: 'https://y.qq.com/' };
   if (req.headers.range) headers.Range = req.headers.range;
   try {
-    const upstream = await fetch(u, { headers, redirect: 'follow' });
-    const out = {
-      'Content-Type': upstream.headers.get('content-type') || 'audio/mpeg',
-      'Cache-Control': 'no-store',
-      'Accept-Ranges': 'bytes',
-    };
-    for (const k of ['content-length', 'content-range']) {
-      const v = upstream.headers.get(k);
-      if (v) out[k] = v;
-    }
-    res.writeHead(upstream.status, out);
+    const upstream = await fetchAudioUpstream(u, headers, (x) => /(^|\.)qq\.com$/i.test(x.hostname));
+    writeAudioHead(upstream, res);
     if (!upstream.body) return res.end();
     pipeUpstream(upstream, res);
   } catch (e) {
-    json(res, 502, { code: 502, error: String(e.message) });
+    json(res, e.statusCode || 502, { code: e.statusCode || 502, error: String(e.message) });
   }
 }
 
@@ -1318,7 +1394,7 @@ const scState = {};             // name → { child, starting, jar }
 for (const name of Object.keys(SIDECARS)) scState[name] = { child: null, starting: null, jar: null };
 
 function scPaths(name) {
-  const dir = path.join(__dirname, 'services', SIDECARS[name].dir);
+  const dir = path.join(SERVICES_DIR, SIDECARS[name].dir);
   return { dir, entry: path.join(dir, 'start.mjs'), portFile: path.join(dir, '.port'), logFile: path.join(dir, '.log') };
 }
 function scPort(name) {
@@ -3568,21 +3644,12 @@ async function proxySourceAudio(req, res, url, source) {
   if (AUDIO_REFERER[source]) headers.Referer = AUDIO_REFERER[source];
   if (req.headers.range) headers.Range = req.headers.range;
   try {
-    const upstream = await fetch(u, { headers, redirect: 'follow' });
-    const out = {
-      'Content-Type': upstream.headers.get('content-type') || 'audio/mpeg',
-      'Cache-Control': 'no-store',
-      'Accept-Ranges': 'bytes',
-    };
-    for (const k of ['content-length', 'content-range']) {
-      const v = upstream.headers.get(k);
-      if (v) out[k] = v;
-    }
-    res.writeHead(upstream.status, out);
+    const upstream = await fetchAudioUpstream(u, headers, (x) => allow.some((re) => re.test(x.hostname)));
+    writeAudioHead(upstream, res);
     if (!upstream.body) return res.end();
     pipeUpstream(upstream, res);
   } catch (e) {
-    json(res, 502, { code: 502, error: String(e.message) });
+    json(res, e.statusCode || 502, { code: e.statusCode || 502, error: String(e.message) });
   }
 }
 
@@ -4108,8 +4175,184 @@ async function normalize(name, data, channel = 'weapi') {
   }
 }
 
-const server = http.createServer(async (req, res) => {
+
+/* ==========================================================================
+   静态文件服务（重写）
+   --------------------------------------------------------------------------
+   旧实现：fs.readFile 整个文件进内存 → 一律 no-cache → 无 ETag / 无压缩 / 无 Range。
+   public/ 有 83MB，其中 three.core.js 1.4MB、app.js 723KB、stages/ 52MB，
+   每开一个形态页就是一次全量重下 + 一次大内存分配。
+
+   现在：
+     · ETag(size+mtime) + If-None-Match → 304，刷新只花一个来回
+     · 分级缓存：js/css/html 仍是 no-cache+ETag（保住「改完刷新立即生效」的开发方式）；
+       字体/图片/音视频/词典等二进制资产 max-age=7天，ETag 兜底
+     · 文本类按需 gzip（异步线程池，不阻塞事件循环），按 ETag 缓存，热门文件只压一次
+     · 流式发送，客户端断开即销毁流；音视频单段 Range → 206，越界 → 416
+     · 正确支持 HEAD；其它方法 405
+   ========================================================================== */
+
+/** 安全解码：非法百分号编码以前会抛 URIError，异步处理器里没人接 → 请求永远挂死 */
+function safeRelPath(p) {
+  let s;
+  try { s = decodeURIComponent(String(p || '')); } catch { return null; }
+  if (s.indexOf('\0') >= 0) return null;
+  return s;
+}
+
+/** 目录包含判断：必须带分隔符，否则 public 的兄弟目录 public-evil 也会被判为「在里面」 */
+function containedIn(fp, root) {
+  const r = path.resolve(root);
+  const f = path.resolve(fp);
+  return f === r || f.startsWith(r + path.sep);
+}
+
+const MIME_EXTRA = {
+  '.mjs': 'text/javascript; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8',
+  '.json': 'application/json; charset=utf-8', '.map': 'application/json; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8', '.svg': 'image/svg+xml',
+  '.mp3': 'audio/mpeg', '.flac': 'audio/flac', '.wav': 'audio/wav', '.m4a': 'audio/mp4',
+  '.ogg': 'audio/ogg', '.opus': 'audio/opus', '.aac': 'audio/aac',
+  '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
+  '.wasm': 'application/wasm', '.avif': 'image/avif', '.webp': 'image/webp',
+  '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf',
+  '.bin': 'application/octet-stream', '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json',
+};
+const mimeOf = (fp) => MIME[path.extname(fp).toLowerCase()] || MIME_EXTRA[path.extname(fp).toLowerCase()] || 'application/octet-stream';
+
+/* 二进制资产：内容基本不变，给长缓存；文本类保持 no-cache 以便随时改随时生效 */
+const LONG_CACHE_EXT = new Set(['.woff', '.woff2', '.ttf', '.otf', '.eot', '.png', '.jpg', '.jpeg', '.gif',
+  '.webp', '.avif', '.ico', '.mp3', '.flac', '.wav', '.m4a', '.ogg', '.opus', '.aac', '.mp4', '.webm',
+  '.mov', '.bin', '.wasm', '.glb', '.gltf']);
+const cacheControlFor = (fp) => LONG_CACHE_EXT.has(path.extname(fp).toLowerCase())
+  ? 'public, max-age=604800' : 'no-cache';
+
+const GZIP_RE = /^(text\/|application\/(javascript|json|x-javascript|xml|wasm)|image\/svg)/;
+const gzipCache = new Map();               // etag → Buffer
+let gzipCacheBytes = 0;
+const GZIP_MAX_BYTES = 48 * 1024 * 1024;
+const GZIP_MAX_ENTRIES = 64;
+const gzipAsync = (buf) => new Promise((res, rej) => zlib.gzip(buf, { level: 6 }, (e, out) => e ? rej(e) : res(out)));
+
+function gzipCachePut(key, buf) {
+  gzipCache.set(key, buf);
+  gzipCacheBytes += buf.length;
+  while ((gzipCacheBytes > GZIP_MAX_BYTES || gzipCache.size > GZIP_MAX_ENTRIES) && gzipCache.size > 1) {
+    const oldest = gzipCache.keys().next().value;
+    gzipCacheBytes -= gzipCache.get(oldest).length;
+    gzipCache.delete(oldest);
+  }
+}
+
+/** 单段 Range 解析；多段/非法返回 null（回退整段 200），越界返回 'invalid'（416） */
+function parseRange(h, size) {
+  if (!h) return null;
+  const m = /^bytes=(\d*)-(\d*)$/.exec(String(h).trim());
+  if (!m) return null;
+  const a = m[1], b = m[2];
+  if (a === '' && b === '') return null;
+  let start, end;
+  if (a === '') {
+    const n = Number(b);
+    if (!n) return null;
+    start = Math.max(0, size - n); end = size - 1;
+  } else {
+    start = Number(a); end = b === '' ? size - 1 : Math.min(Number(b), size - 1);
+  }
+  if (!Number.isFinite(start) || start >= size || end < start) return 'invalid';
+  return { start, end };
+}
+
+function send404(res) {
+  res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+  res.end('404');
+}
+
+async function serveStatic(req, res, url) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405, { Allow: 'GET, HEAD', 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('405');
+  }
+  const rel = safeRelPath(url.pathname);
+  if (rel === null) return json(res, 400, { error: 'bad path' });
+  let p = rel === '' || rel === '/' ? '/index.html' : rel;
+  if (p.endsWith('/')) p += 'index.html';
+  let fp = path.join(PUBLIC_DIR, p);
+  if (!containedIn(fp, PUBLIC_DIR)) return json(res, 403, { error: 'forbidden' });
+
+  let st;
+  try { st = await fs.promises.stat(fp); } catch { return send404(res); }
+  if (st.isDirectory()) {
+    fp = path.join(fp, 'index.html');
+    if (!containedIn(fp, PUBLIC_DIR)) return json(res, 403, { error: 'forbidden' });
+    try { st = await fs.promises.stat(fp); } catch { return send404(res); }
+  }
+  if (!st.isFile()) return send404(res);
+
+  const etag = 'W/"' + st.size.toString(16) + '-' + Math.floor(st.mtimeMs).toString(16) + '"';
+  const cc = cacheControlFor(fp);
+  const type = mimeOf(fp);
+  const baseHeaders = { 'Content-Type': type, 'Cache-Control': cc, ETag: etag, 'Accept-Ranges': 'bytes' };
+
+  const inm = req.headers['if-none-match'];
+  if (inm && inm.split(',').map((s) => s.trim()).includes(etag)) {
+    res.writeHead(304, { 'Cache-Control': cc, ETag: etag });
+    return res.end();
+  }
+
+  /* 音视频等：单段 Range → 206，拖进度条不再整段重下 */
+  const range = parseRange(req.headers.range, st.size);
+  if (range === 'invalid') {
+    res.writeHead(416, { 'Content-Range': 'bytes */' + st.size, 'Accept-Ranges': 'bytes' });
+    return res.end();
+  }
+  if (range) {
+    const len = range.end - range.start + 1;
+    res.writeHead(206, Object.assign({}, baseHeaders, {
+      'Content-Range': 'bytes ' + range.start + '-' + range.end + '/' + st.size,
+      'Content-Length': len,
+    }));
+    if (req.method === 'HEAD') return res.end();
+    const stream = fs.createReadStream(fp, { start: range.start, end: range.end });
+    stream.on('error', () => { try { res.destroy(); } catch { /* 已断 */ } });
+    res.on('close', () => stream.destroy());
+    return stream.pipe(res);
+  }
+
+  /* 文本类按需 gzip：结果按 ETag 缓存，热门文件只压一次 */
+  const accepts = /\bgzip\b/i.test(String(req.headers['accept-encoding'] || ''));
+  if (accepts && GZIP_RE.test(type) && st.size <= 8 * 1024 * 1024) {
+    let gz = gzipCache.get(etag);
+    if (!gz) {
+      try {
+        const raw = await fs.promises.readFile(fp);
+        gz = await gzipAsync(raw);
+        if (gz.length < raw.length) gzipCachePut(etag, gz); else gz = null;
+      } catch { gz = null; }
+    }
+    if (gz) {
+      res.writeHead(200, Object.assign({}, baseHeaders, { 'Content-Encoding': 'gzip', 'Content-Length': gz.length, Vary: 'Accept-Encoding' }));
+      return res.end(req.method === 'HEAD' ? undefined : gz);
+    }
+  }
+
+  res.writeHead(200, Object.assign({}, baseHeaders, { 'Content-Length': st.size, Vary: 'Accept-Encoding' }));
+  if (req.method === 'HEAD') return res.end();
+  const stream = fs.createReadStream(fp);
+  stream.on('error', () => { try { res.destroy(); } catch { /* 已断 */ } });
+  res.on('close', () => stream.destroy());
+  stream.pipe(res);
+}
+
+/* 请求分发：任何异常都必须落成一个真实 HTTP 响应，不能让请求挂死 */
+async function routeRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
+
+  /* ---- 健康检查：容器 HEALTHCHECK / 反代探活用，不碰任何上游 ---- */
+  if (url.pathname === '/healthz') {
+    return json(res, 200, { ok: true, pid: process.pid, uptime: Math.round(process.uptime()) });
+  }
 
   /* ---- 静态图片代理 ---- */
   if (url.pathname === '/api/img') {
@@ -4308,58 +4551,52 @@ const server = http.createServer(async (req, res) => {
 
   /* ---- 创意网站：按原路径只读提供 ---- */
   if (url.pathname.startsWith('/creative/')) {
-    const relC = path.normalize(decodeURIComponent(url.pathname.slice('/creative/'.length)));
-    if (relC.startsWith('..') || path.isAbsolute(relC)) return json(res, 403, { error: 'forbidden' });
-    const fp = path.join(CREATIVE_DIR, relC === '.' ? 'index.html' : relC);
-    if (!fp.startsWith(CREATIVE_DIR)) return json(res, 403, { error: 'forbidden' });
+    const relC = safeRelPath(url.pathname.slice('/creative/'.length));
+    if (relC === null) return json(res, 400, { error: 'bad path' });
+    const norm = path.normalize(relC);
+    if (norm.startsWith('..') || path.isAbsolute(norm)) return json(res, 403, { error: 'forbidden' });
+    const fp = path.join(CREATIVE_DIR, norm === '.' || norm === '' ? 'index.html' : norm);
+    if (!containedIn(fp, CREATIVE_DIR)) return json(res, 403, { error: 'forbidden' });
 
-    fs.readFile(fp, (err, buf) => {
-      if (err) {
-        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-        return res.end('404 创意站点文件不存在: ' + relC);
-      }
-      const ext = path.extname(fp).toLowerCase();
-      let body = buf;
-      let type = MIME[ext] || 'application/octet-stream';
+    let buf;
+    try { buf = await fs.promises.readFile(fp); } catch {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end('404 创意站点文件不存在: ' + relC);
+    }
+    const ext = path.extname(fp).toLowerCase();
+    let body = buf;
+    let type = mimeOf(fp);
 
-      // HTML 在**发送时**打两个补丁，不动磁盘上的原文件：
-      //   1. body 加 data-chrome="off" —— base.js 据此不再注入它的返回键和角标
-      //      （播放器有自己的界面，不需要那套画廊 chrome）
-      //   2. 注入桥接脚本 —— 让作品能收到播放器的节拍/能量/主色；不监听也照常工作
-      if (ext === '.html') {
-        let html = buf.toString('utf8');
-        if (!/data-chrome=/.test(html)) html = html.replace(/<body\b/, '<body data-chrome="off"');
-        html = html.replace('</body>', BRIDGE_TAG + '\n</body>');
-        body = Buffer.from(html, 'utf8');
-        type = 'text/html; charset=utf-8';
-      }
-
-      res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache', 'Content-Length': body.length });
-      res.end(body);
-    });
-    return;
+    // HTML 在**发送时**打两个补丁，不动磁盘上的原文件：
+    //   1. body 加 data-chrome="off" —— base.js 据此不再注入它的返回键和角标
+    //   2. 注入桥接脚本 —— 让作品能收到播放器的节拍/能量/主色；不监听也照常工作
+    if (ext === '.html') {
+      let html = buf.toString('utf8');
+      if (!/data-chrome=/.test(html)) html = html.replace(/<body\b/, '<body data-chrome="off"');
+      html = html.replace('</body>', BRIDGE_TAG + '\n</body>');
+      body = Buffer.from(html, 'utf8');
+      type = 'text/html; charset=utf-8';
+    }
+    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache', 'Content-Length': body.length });
+    return res.end(req.method === 'HEAD' ? undefined : body);
   }
 
   /* ---- 静态文件 ---- */
-  let rel = decodeURIComponent(url.pathname);
-  if (rel === '/') rel = '/index.html';
-  /* 目录带尾斜杠补 index.html：官网在 public/site/，所以 /site/ 和 /site/index.html 都能进
-     （以前只有根目录做了这件事，子目录一路 404） */
-  else if (rel.endsWith('/')) rel += 'index.html';
-  const filePath = path.join(PUBLIC_DIR, path.normalize(rel).replace(/^(\.\.[\\/])+/, ''));
-  if (!filePath.startsWith(PUBLIC_DIR)) return json(res, 403, { error: 'forbidden' });
+  return serveStatic(req, res, url);
+}
 
-  fs.readFile(filePath, (err, buf) => {
-    if (err) {
-      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-      return res.end('404');
-    }
-    res.writeHead(200, {
-      'Content-Type': MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream',
-      'Cache-Control': 'no-cache',
+/* 外层兜底：routeRequest 里任何漏网异常（含非法编码、上游怪响应）都变成 500，
+   而不是被进程级 unhandledRejection 吞掉后让浏览器一直转圈。 */
+const server = http.createServer((req, res) => {
+  Promise.resolve()
+    .then(() => routeRequest(req, res))
+    .catch((e) => {
+      const code = e && e.statusCode ? e.statusCode : 500;
+      try {
+        if (!res.headersSent) json(res, code, { code, error: String((e && e.message) || e) });
+        else res.destroy();
+      } catch { try { res.destroy(); } catch { /* 彻底断了 */ } }
     });
-    res.end(buf);
-  });
 });
 
 /* ==========================================================================
@@ -4388,9 +4625,9 @@ process.on('uncaughtException', (err) => {
 /* 监听：端口 0 = 让系统分配。Windows 上有一大批端口被系统/Hyper-V 保留
    （监听会报 EACCES），所以默认不写死端口，拿到之后写进 .port 供 start.cmd 打开浏览器。 */
 function listen() {
-  server.listen(PORT, '127.0.0.1', () => {
+  server.listen(PORT, process.env.HOST || '127.0.0.1', () => {
     PORT = server.address().port;
-    fs.writeFileSync(path.join(__dirname, '.port'), String(PORT));
+    try { fs.writeFileSync(dataPath('.port'), String(PORT)); } catch { /* 状态目录不可写不影响服务 */ }
     console.log(`\n  液态玻璃 · 网易云音乐播放器`);
     console.log(`  → http://127.0.0.1:${PORT}\n`);
     console.log(`  登录态: ${cookies.MUSIC_U ? '已保存（重启后仍有效）' : '未登录（可匿名浏览歌单）'}`);
@@ -4415,10 +4652,20 @@ const stopQQ = () => {
   if (qqChild && qqChild.exitCode === null) {
     try { qqChild.kill(); } catch { /* 已经没了 */ }
   }
+  /* 其它音源边车也要一起收：容器 stop 时只收 QQ 会留下孤儿进程，
+     下次启动端口被占，表现为「某个音源突然 502」。 */
+  for (const name of Object.keys(scState)) {
+    const c = scState[name] && scState[name].child;
+    if (c && c.exitCode === null) { try { c.kill(); } catch { /* 已经没了 */ } }
+  }
 };
 process.on('exit', stopQQ);
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGBREAK']) {
-  process.on(sig, () => { stopQQ(); process.exit(0); });
+  process.on(sig, () => {
+    stopQQ();
+    /* 给边车一点时间自己退干净，再退主进程（容器 stop 的宽限期内） */
+    setTimeout(() => process.exit(0), 300);
+  });
 }
 
 

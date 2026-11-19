@@ -24,6 +24,13 @@ public/site/download/
 # 网易云设备指纹（每台机器一份，不进版本库）
 .netease-device.json
 
+# 边车运行时凭证 / 登录态（扫码后写入边车目录，不进版本库）
+.auth-*
+.client.json
+cookie*.txt
+device.json
+.cache/
+
 # 本地手滑备份（*.bak / *.bak-时间戳），不进版本库
 *.bak
 *.bak-*

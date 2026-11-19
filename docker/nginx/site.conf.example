@@ -1,6 +1,6 @@
 # 站点示例（nginx / openresty）：域名 + HTTPS 反代到 LIZI 容器。
 # 下面的域名、证书路径、日志路径都按你自己的环境替换；
-# 真正的上游转发规则见同目录 lizi-proxy.conf。
+# 真正的上游转发规则见同目录 proxy.conf.example。
 
 server {
     listen 80;
@@ -24,7 +24,7 @@ server {
 
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains";
 
-    # 上游转发（等价于 lizi-proxy.conf 的内容，或用 include 引入）
+    # 上游转发（等价于 proxy.conf.example 的内容，或用 include 引入）
     location ^~ / {
         proxy_pass http://127.0.0.1:8088;
         proxy_set_header Host $host;
