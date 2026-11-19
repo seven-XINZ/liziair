@@ -8657,3 +8657,18 @@ body.is-stage .updtoast { bottom: 18px; }
 .pstrip__i { touch-action: pan-y; }
 /* 「我的」卡片轮播同理：左右滑切平台，上下滑仍是页面滚动 */
 #hall-me .me { touch-action: pan-y; }
+
+/* 移动端铺色态：海报已占 220~300px，歌单区必须收窄，否则把平台面板挤溢出（2026-11-19） */
+@media (max-width: 560px) {
+  #view-hall.is-plat-mode .hall-quick { margin-bottom: 6px; }
+  #view-hall.is-plat-mode .hall-quick__head { margin-bottom: 4px; }
+  #view-hall.is-plat-mode .hall-quick__title { font-size: 12px; }
+  #view-hall.is-plat-mode .hq-card,
+  #view-hall.is-plat-mode .hq-card__cover { width: 84px; }
+  #view-hall.is-plat-mode .hq-card__cover { height: 84px; border-radius: 10px; }
+  #view-hall.is-plat-mode .hq-card__name { font-size: 11px; -webkit-line-clamp: 1; }
+  #view-hall.is-plat-mode .hq-card__sub { font-size: 10px; }
+  #view-hall.is-plat-mode .hq-card__badge { font-size: 9px; padding: 1px 5px; }
+}
+/* 折叠态：用户主动收起面板看海报，歌单区一并让位 */
+#view-hall.is-plat-folded .hall-quick { display: none; }

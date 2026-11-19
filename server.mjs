@@ -305,13 +305,18 @@ function pipeUpstream(upstream, res, label = 'stream') {
    一次失败就整个接口 502，表现就是"突然播不了音乐"。
    所以带超时 + 重试：连不上就再试两次，每次给足 15 秒。 */
 async function fetchUpstream(url, init = {}, tries = 3) {
+  /* 扫码轮询是「前端 20s 就超时」的短请求：服务端再按 3×15s 重试的话，
+     前端早就先超时了，表现为扫码一直转圈。这类路径只试一次、每次 8s。 */
+  const polling = /\/login\/qrcode\/|\/login\/qr\//.test(String(url));
+  const maxTries = polling ? 1 : tries;
+  const perTryMs = polling ? 8000 : 15000;
   let lastErr;
-  for (let i = 0; i < tries; i++) {
+  for (let i = 0; i < maxTries; i++) {
     try {
-      return await fetch(url, { ...init, signal: AbortSignal.timeout(15000) });
+      return await fetch(url, { ...init, signal: AbortSignal.timeout(perTryMs) });
     } catch (e) {
       lastErr = e;
-      if (i < tries - 1) await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+      if (i < maxTries - 1) await new Promise((r) => setTimeout(r, 400 * (i + 1)));
     }
   }
   throw lastErr;
@@ -449,12 +454,55 @@ const IMAGE_HOST_SUFFIX = ['.kugou.com', '.douyinpic.com', '.douyincdn.com', '.h
   '.y.qq.com', '.qlogo.cn', '.qpic.cn'];
 const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 
+/* 封面服务端缓存（2026-11-19 收尾）
+   首页歌单区一次就要 7 张封面，锁屏媒体信息还会再取一遍；以前每次都回源。
+   这里做小额 LRU：24h TTL、96 条 / 32MB 上限，单张 >2MB 不入缓存。
+   命中直接回，带 X-Cache: HIT 便于排查。 */
+const IMG_CACHE = new Map();
+let imgCacheBytes = 0;
+const IMG_CACHE_MAX_BYTES = 32 * 1024 * 1024;
+const IMG_CACHE_MAX_ENTRIES = 96;
+const IMG_CACHE_TTL = 24 * 60 * 60 * 1000;
+
+function imgCacheGet(k) {
+  const hit = IMG_CACHE.get(k);
+  if (!hit) return null;
+  if (Date.now() - hit.at > IMG_CACHE_TTL) {
+    imgCacheBytes -= hit.buf.length;
+    IMG_CACHE.delete(k);
+    return null;
+  }
+  IMG_CACHE.delete(k); IMG_CACHE.set(k, hit);   // LRU：命中后挪到末尾
+  return hit;
+}
+function imgCachePut(k, buf, type) {
+  if (!buf || buf.length > 2 * 1024 * 1024) return;
+  if (IMG_CACHE.has(k)) { imgCacheBytes -= IMG_CACHE.get(k).buf.length; IMG_CACHE.delete(k); }
+  IMG_CACHE.set(k, { buf, type, at: Date.now() });
+  imgCacheBytes += buf.length;
+  while ((imgCacheBytes > IMG_CACHE_MAX_BYTES || IMG_CACHE.size > IMG_CACHE_MAX_ENTRIES) && IMG_CACHE.size > 1) {
+    const oldest = IMG_CACHE.keys().next().value;
+    imgCacheBytes -= IMG_CACHE.get(oldest).buf.length;
+    IMG_CACHE.delete(oldest);
+  }
+}
+
 async function proxyImage(res, rawUrl) {
   let u;
   try { u = new URL(rawUrl); } catch { return json(res, 400, { error: 'bad url' }); }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return json(res, 400, { error: 'bad protocol' });
   const hostOk = (x) => IMAGE_HOSTS.has(x.hostname) || IMAGE_HOST_SUFFIX.some((s) => x.hostname.endsWith(s));
   if (!hostOk(u)) return json(res, 403, { error: 'host not allowed' });
+  const cacheKey = u.href;
+  const cached = imgCacheGet(cacheKey);
+  if (cached) {
+    res.writeHead(200, {
+      'Content-Type': cached.type || 'image/jpeg',
+      'Cache-Control': 'public, max-age=86400',
+      'X-Cache': 'HIT',
+    });
+    return res.end(cached.buf);
+  }
   try {
     const upstream = await fetch(u, {
       headers: { Referer: 'https://music.163.com/', 'User-Agent': 'Mozilla/5.0' },
@@ -470,9 +518,11 @@ async function proxyImage(res, rawUrl) {
     if (declared > IMAGE_MAX_BYTES) return json(res, 413, { error: 'image too large' });
     const buf = Buffer.from(await upstream.arrayBuffer());
     if (buf.length > IMAGE_MAX_BYTES) return json(res, 413, { error: 'image too large' });
+    if (upstream.status === 200) imgCachePut(cacheKey, buf, type);
     res.writeHead(upstream.status, {
       'Content-Type': type || 'image/jpeg',
       'Cache-Control': 'public, max-age=86400',
+      'X-Cache': 'MISS',
     });
     res.end(buf);
   } catch (e) {
@@ -4347,12 +4397,105 @@ async function serveStatic(req, res, url) {
 }
 
 /* 请求分发：任何异常都必须落成一个真实 HTTP 响应，不能让请求挂死 */
+/* ==========================================================================
+   设备配对（Windows / 安卓客户端：域名 + key 一次登录，长期免登）
+   --------------------------------------------------------------------------
+   密钥来源：环境变量 LIZI_ACCESS_KEY，或数据目录下的 .access-key 文件。
+   **两者都为空 = 门禁关闭**，站点行为与以前完全一致（不影响现有浏览器访问）。
+   一旦设置密钥：页面与 /api/* 都需要有效令牌，只有 /healthz 与配对接口放行。
+
+   令牌是无状态的：`过期时间.HMAC_SHA256(key, 'lizi-access:'+过期时间)`，
+   服务端不存会话，重启不失效；换密钥即让所有旧令牌立刻作废。
+   客户端可用 Cookie、Authorization: Bearer，或 ?lizi_key= 三种方式携带。
+   ========================================================================== */
+const ACCESS_COOKIE = 'lizi_access';
+const ACCESS_TTL_MS = 30 * 24 * 60 * 60 * 1000;      // 30 天
+
+function accessKey() {
+  const fromEnv = String(process.env.LIZI_ACCESS_KEY || '').trim();
+  if (fromEnv) return fromEnv;
+  try { return String(fs.readFileSync(dataPath('.access-key'), 'utf8') || '').trim(); } catch { return ''; }
+}
+function signToken(exp, key) {
+  return exp + '.' + crypto.createHmac('sha256', key).update('lizi-access:' + exp).digest('hex');
+}
+function tokenValid(token, key) {
+  if (!token || !key) return false;
+  const i = String(token).lastIndexOf('.');
+  if (i < 1) return false;
+  const exp = Number(token.slice(0, i));
+  if (!Number.isFinite(exp) || exp < Date.now()) return false;
+  const want = signToken(exp, key);
+  const a = Buffer.from(want), b = Buffer.from(String(token));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+/* 各平台登录态汇总：客户端据此画绿标（已登录）/ 红标（未登录）。
+   网易云走本地 session，其余边车走各自 /status；任一超时或报错都算未登录，不卡整体。 */
+const PLATFORM_LIST = [
+  { id: 'netease', name: '网易云' }, { id: 'qq', name: 'QQ 音乐' },
+  { id: 'kugou', name: '酷狗' }, { id: 'qishui', name: '汽水' },
+  { id: 'bodian', name: '波点' }, { id: 'kuwo', name: '酷我' },
+  { id: 'spotify', name: 'Spotify' },
+];
+async function platformStates() {
+  const base = `http://127.0.0.1:${PORT}`;
+  return Promise.all(PLATFORM_LIST.map(async (p) => {
+    const path = p.id === 'netease' ? '/api/session' : `/api/${p.id}/status`;
+    try {
+      const r = await fetch(base + path, { signal: AbortSignal.timeout(6000) });
+      const d = await r.json();
+      const on = !!(d && d.loggedIn) && !(p.id === 'spotify' && d.error);
+      const prof = (d && d.profile) || d || {};
+      return { id: p.id, name: p.name, loggedIn: on,
+               nickname: on ? String(prof.nickname || prof.name || '') : '',
+               uid: on ? String(prof.userId || prof.uid || prof.uin || '') : '' };
+    } catch {
+      return { id: p.id, name: p.name, loggedIn: false, nickname: '', uid: '' };
+    }
+  }));
+}
+
+function reqToken(req, url) {
+  const auth = String(req.headers.authorization || '');
+  if (/^Bearer\s+/i.test(auth)) return auth.replace(/^Bearer\s+/i, '').trim();
+  const q = url.searchParams.get('lizi_key');
+  if (q) return q;
+  const raw = String(req.headers.cookie || '');
+  for (const part of raw.split(';')) {
+    const [k, ...v] = part.trim().split('=');
+    if (k === ACCESS_COOKIE) return decodeURIComponent(v.join('='));
+  }
+  return '';
+}
+
 async function routeRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   /* ---- 健康检查：容器 HEALTHCHECK / 反代探活用，不碰任何上游 ---- */
   if (url.pathname === '/healthz') {
     return json(res, 200, { ok: true, pid: process.pid, uptime: Math.round(process.uptime()) });
+  }
+
+  /* ---- 设备配对：客户端输入「域名 + key」换长期令牌，之后免重复登录 ---- */
+  if (url.pathname === '/api/pair/status') {
+    return json(res, 200, { enabled: !!accessKey(), cookie: ACCESS_COOKIE, ttlDays: ACCESS_TTL_MS / 86400000 });
+  }
+  if (url.pathname === '/api/pair' && req.method === 'POST') {
+    /* key 只用于「软件对接」，不是网页门禁：网页照常访问，登录态始终留在服务端。
+       客户端不保存任何 cookie，只记住域名与 key。 */
+    const key = accessKey();
+    const body = await readBody(req);
+    const given = String((body && body.key) || '').trim();
+    if (key) {
+      const a = Buffer.from(key), b = Buffer.from(given);
+      if (!(a.length === b.length && crypto.timingSafeEqual(a, b))) {
+        return json(res, 403, { ok: false, error: '对接密钥不正确' });
+      }
+    }
+    return json(res, 200, { ok: true, keyRequired: !!key, platforms: await platformStates() });
+  }
+  if (url.pathname === '/api/platforms') {
+    return json(res, 200, { keyRequired: !!accessKey(), platforms: await platformStates() });
   }
 
   /* ---- 静态图片代理 ---- */
