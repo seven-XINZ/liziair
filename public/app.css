@@ -2216,6 +2216,15 @@ body.is-desktop .stagebar { padding-right: 160px; }
 /* 隐形热区：往左、往上下各扩一圈，指针进这个范围就算"靠近" */
 .sbar-right::before { content: ''; position: absolute; inset: -14px -10px -22px -300px; }
 
+/* 左上返回键压在歌卡热区之上：
+   那条 ::before 往左扩 300px，窄屏上会横穿整条操作条并把返回键挡掉，
+   点下去只触发「歌卡展开」，看起来就是"返回没反应"（2026-11-21 修）。
+   窄屏也不再往左扩那么远：热区只在右侧一小圈就够。 */
+#stage-back, #btn-back { position: relative; z-index: 3; }
+@media (max-width: 900px) {
+  .sbar-right::before { inset: -14px -10px -22px -10px; }
+}
+
 /* 当前歌曲：收起时就是一块 1:1 的封面玻璃砖（64×64），
    指针靠近右侧那一簇横向展开成迷你播放器（歌名 / 切歌 / 时间轴）。 */
 .snow { flex: none; }
@@ -3563,18 +3572,15 @@ body.is-now .ntr--play .ico { width: 34px; height: 34px; }
 body.is-now #ntr-mode { width: 40px; height: 40px; }
 body.is-now #ntr-mode .ico { width: 17px; height: 17px; }
 
-/* ---- 播放键的形变：播放三角 ↔ 暂停双条 ----
-   三角拆成左右两半（两个四边形），播放时两半各自"拉直"成竖条。
-   两份 path 的点数一致，Chromium 才能对 d 做插值。 */
-#ntr-play .pn-svg { overflow: visible; }
-#ntr-play .pn {
-  fill: currentColor;
-  transition: d .34s cubic-bezier(.32,.72,0,1);
-}
-#ntr-play .pn-l { d: path("M8 4.6L13.6 8.2L13.6 15.8L8 19.4Z"); }
-#ntr-play .pn-r { d: path("M14.4 8.3L20 12L20 12L14.4 15.7Z"); }
-body.is-playing #ntr-play .pn-l { d: path("M8 5L11.2 5L11.2 19L8 19Z"); }
-body.is-playing #ntr-play .pn-r { d: path("M13.8 5L17 5L17 19L13.8 19Z"); }
+/* ---- 播放键：三角 ↔ 暂停双条 ----
+   iOS Safari 不认 CSS 的 d: path()（只有 Chromium 能对 path 做形变），
+   手机上按了播放，图标一直停在三角。改成两套图标淡切：任何浏览器一致。 */
+#ntr-play { position: relative; }
+#ntr-play .pn-svg { overflow: visible; transition: opacity .18s cubic-bezier(.32,.72,0,1); }
+#ntr-play .pn { fill: currentColor; }
+#ntr-play .pn-pause { position: absolute; inset: 0; margin: auto; opacity: 0; pointer-events: none; }
+body.is-playing #ntr-play .pn-play { opacity: 0; }
+body.is-playing #ntr-play .pn-pause { opacity: 1; }
 /* 纯字形版：播放时只是图标变化，底板交给上面的圆角悬停，不再有白圆 */
 body.is-playing #ntr-play { color: oklch(99% 0.003 270); }
 

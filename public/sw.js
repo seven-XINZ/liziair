@@ -29,6 +29,10 @@ self.addEventListener('activate', (e) => {
 });
 
 const CACHE_FIRST = /\.(png|jpe?g|gif|webp|avif|ico|svg|woff2?|ttf|otf)$/i;
+/* 图片/字体缓存上限：手机存储有限，攒到几百条就淘汰最早的一批，
+   避免用户逛久了把缓存撑到几百 MB。 */
+const CACHE_MAX_ENTRIES = 320;
+const CACHE_MAX_BYTES = 3 * 1024 * 1024;
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
@@ -47,7 +51,17 @@ self.addEventListener('fetch', (event) => {
       if (hit) return hit;
       try {
         const res = await fetch(req);
-        if (res && res.ok && res.type === 'basic') c.put(req, res.clone());
+        if (res && res.ok && res.type === 'basic') {
+          const len = Number(res.headers.get('content-length') || 0);
+          if (!len || len <= CACHE_MAX_BYTES) {
+            const keys = await c.keys();
+            if (keys.length >= CACHE_MAX_ENTRIES) {
+              const drop = keys.slice(0, Math.ceil(keys.length / 4));
+              await Promise.all(drop.map((k) => c.delete(k).catch(() => {})));
+            }
+            c.put(req, res.clone()).catch(() => {});
+          }
+        }
         return res;
       } catch (err) {
         if (hit) return hit;

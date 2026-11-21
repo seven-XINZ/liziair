@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LIZI · 形态施工中</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: grid;
+    place-items: center;
+    padding: 28px;
+    background:
+      radial-gradient(120% 90% at 50% 0%, #141a2a 0%, #0a0d14 46%, #05060a 100%);
+    color: #eef1f7;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    overflow: hidden;
+  }
+  /* 一层很淡的网格，和舞台页的底噪保持一致 */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: -20%;
+    background-image:
+      linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+    background-size: 44px 44px;
+    transform: perspective(900px) rotateX(58deg) translateY(20%);
+    mask-image: radial-gradient(60% 50% at 50% 45%, #000 0%, transparent 72%);
+    pointer-events: none;
+  }
+  .card {
+    position: relative;
+    width: min(560px, 100%);
+    padding: 34px 30px 28px;
+    border-radius: 24px;
+    background: rgba(18, 21, 30, .78);
+    border: 1px solid rgba(255,255,255,.10);
+    box-shadow: 0 30px 90px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06);
+    backdrop-filter: blur(18px) saturate(1.05);
+    -webkit-backdrop-filter: blur(18px) saturate(1.05);
+    text-align: center;
+  }
+  .dot {
+    width: 46px; height: 46px;
+    margin: 0 auto 18px;
+    display: grid; place-items: center;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, rgba(140,190,255,.30), rgba(90,140,230,.08) 65%);
+    border: 1px solid rgba(140,190,255,.30);
+  }
+  .dot span {
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: #8fc2ff;
+    box-shadow: 0 0 18px rgba(143,194,255,.85);
+    animation: breathe 2.2s ease-in-out infinite;
+  }
+  @keyframes breathe {
+    0%, 100% { transform: scale(.82); opacity: .55; }
+    50%      { transform: scale(1.12); opacity: 1; }
+  }
+  h1 {
+    margin: 0 0 10px;
+    font-size: 21px;
+    font-weight: 650;
+    letter-spacing: .03em;
+  }
+  p {
+    margin: 0 auto;
+    max-width: 42em;
+    font-size: 13.5px;
+    line-height: 1.75;
+    color: rgba(238,241,247,.64);
+  }
+  .tags {
+    margin-top: 20px;
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .tag {
+    padding: 5px 11px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    color: rgba(238,241,247,.66);
+    background: rgba(255,255,255,.05);
+    border: 1px solid rgba(255,255,255,.10);
+  }
+  .foot {
+    margin-top: 22px;
+    font-size: 11px;
+    letter-spacing: .14em;
+    color: rgba(238,241,247,.28);
+  }
+  @media (max-width: 480px) {
+    .card { padding: 26px 20px 22px; border-radius: 20px; }
+    h1 { font-size: 18.5px; }
+    p { font-size: 13px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dot span { animation: none; }
+  }
+</style>
+</head>
+<body>
+  <main class="card" role="status" aria-live="polite">
+    <div class="dot" aria-hidden="true"><span></span></div>
+    <h1>这个运动路径还在施工中</h1>
+    <p>清单里登记了它，画面这一版还没落地。先换一个形态试试，或者等下一次更新把它补上。</p>
+    <div class="tags" aria-hidden="true">
+      <span class="tag">歌词逐字入场</span>
+      <span class="tag">节拍驱动</span>
+      <span class="tag">空间构图</span>
+    </div>
+    <div class="foot">LIZI · STAGE NOT BUILT</div>
+  </main>
+</body>
+</html>

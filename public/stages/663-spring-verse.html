@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>弹簧诗行 · LIZI</title>
+<style>
+  :root {
+    --accent-rgb: 143, 194, 255;
+    --accent2-rgb: 255, 158, 203;
+    --pulse: 0;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: #04060b; }
+  body {
+    font-family: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+    color: #f2f5fb;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: geometricPrecision;
+  }
+
+  /* ---------- 壁纸引擎底：两团缓慢漂移的色雾 ---------- */
+  .bg { position: fixed; inset: 0; overflow: hidden; pointer-events: none;
+    background: radial-gradient(120% 100% at 50% 0%, #101726 0%, #070a11 45%, #04060b 100%); }
+  .blob { position: absolute; width: 68vmax; height: 68vmax; border-radius: 50%;
+    filter: blur(72px); opacity: .5; }
+  .b1 { left: -28vmax; top: -24vmax;
+    background: radial-gradient(circle at 50% 50%, rgba(var(--accent-rgb), .55) 0%, rgba(var(--accent-rgb), 0) 68%);
+    animation: drift1 28s ease-in-out infinite alternate; }
+  .b2 { right: -32vmax; bottom: -26vmax; opacity: .34;
+    background: radial-gradient(circle at 50% 50%, rgba(var(--accent2-rgb), .5) 0%, rgba(var(--accent2-rgb), 0) 70%);
+    animation: drift2 34s ease-in-out infinite alternate; }
+  @keyframes drift1 { from { transform: translate3d(0,0,0) scale(1); } to { transform: translate3d(10vmax,8vmax,0) scale(1.09); } }
+  @keyframes drift2 { from { transform: translate3d(0,0,0) scale(1.06); } to { transform: translate3d(-9vmax,-7vmax,0) scale(.97); } }
+
+  /* ---------- 液态高光条：一条横贯的折射带 ---------- */
+  .beam { position: fixed; left: -18%; right: -18%; top: 58%; height: 30vh; pointer-events: none;
+    opacity: calc(.30 + var(--pulse) * .55);
+    background: linear-gradient(90deg,
+      rgba(var(--accent-rgb), 0) 0%,
+      rgba(var(--accent-rgb), .22) 20%,
+      rgba(255,255,255,.10) 44%,
+      rgba(var(--accent2-rgb), .18) 66%,
+      rgba(var(--accent2-rgb), 0) 100%);
+    filter: blur(24px);
+    transform: rotate(-8deg);
+    animation: beamFloat 20s ease-in-out infinite alternate; }
+  @keyframes beamFloat {
+    from { transform: rotate(-8deg) translateY(2vh); }
+    to   { transform: rotate(-5deg) translateY(-7vh); }
+  }
+
+  /* ---------- 字：逐字弹簧 ---------- */
+  .stage { position: fixed; inset: 0; pointer-events: none; }
+  .line { position: absolute; left: 50%; top: 50%;
+    display: flex; align-items: center; justify-content: center;
+    white-space: nowrap;
+    transform: translate(-50%, -50%);
+    transition: opacity .55s ease;
+    will-change: transform; }
+  .line.out { opacity: 0; }
+
+  /* 五组空间构图：0 正中，1 左斜，2 竖排，3 环形，4 对角线 */
+  .line.comp-1 { transform: translate(-50%, -54%) rotate(-7deg); }
+  .line.comp-2 { writing-mode: vertical-rl; letter-spacing: .16em; }
+  .line.comp-3 { transform: translate(-50%, -50%); }
+  .line.comp-4 { transform: translate(-50%, -50%) rotate(-36deg); }
+
+  .ch { display: inline-block; }
+  .ch-in {
+    display: inline-block;
+    transform-origin: 50% 76%;
+    will-change: transform, opacity;
+    opacity: 0;
+    text-shadow:
+      0 0 1px rgba(255,255,255,.55),
+      0 0 20px rgba(var(--accent-rgb), .42);
+  }
+  .line.comp-2 .ch { display: block; }
+  .line.comp-3 .ch { position: absolute; left: 50%; top: 50%; }
+
+  .hint { position: fixed; left: 50%; bottom: max(26px, env(safe-area-inset-bottom)); transform: translateX(-50%);
+    font-size: 12px; letter-spacing: .16em; color: rgba(242,245,251,.45); pointer-events: none;
+    transition: opacity .4s ease; }
+  .hint.gone { opacity: 0; }
+</style>
+</head>
+<body>
+  <div class="bg" aria-hidden="true">
+    <div class="blob b1"></div>
+    <div class="blob b2"></div>
+  </div>
+  <div class="beam" aria-hidden="true"></div>
+  <div class="stage" id="stage" aria-live="polite"></div>
+  <div class="hint" id="hint">等待第一句…</div>
+
+<script>
+(() => {
+  'use strict';
+  const stageEl = document.getElementById('stage');
+  const hint = document.getElementById('hint');
+
+  let lines = [];
+  let accentRgb = [143, 194, 255];
+  let accent2Rgb = [255, 158, 203];
+  let curIdx = -1;
+  let playing = false;
+  let clockT = 0;
+  let clockAt = performance.now();
+  let pulse = 0;
+  let raf = 0;
+  let lastFrame = performance.now();
+
+  /* tick 已给到当前秒数；句内滚动用本地时钟插值，避免 15Hz 的跳字 */
+  let tickAt = performance.now();
+  let tickTime = 0;
+  function playhead(nowMs) {
+    const dt = (nowMs - tickAt) / 1000;
+    return tickTime + (playing ? dt : 0);
+  }
+
+  /* ---------- 颜色 ---------- */
+  function hexToRgb(hex) {
+    const s = String(hex || '').replace('#', '').trim();
+    if (s.length === 3) return [parseInt(s[0] + s[0], 16), parseInt(s[1] + s[1], 16), parseInt(s[2] + s[2], 16)];
+    if (s.length >= 6) return [parseInt(s.slice(0, 2), 16), parseInt(s.slice(2, 4), 16), parseInt(s.slice(4, 6), 16)];
+    return null;
+  }
+  function rgbCss(rgb) { return rgb[0] + ',' + rgb[1] + ',' + rgb[2]; }
+
+  /* ---------- 弹簧：每字一条独立弹簧 ---------- */
+  const chars = [];   // { el, y, v, target, k, c, rot, rv, scale, sv }
+  const FONT_MAX = 64;
+
+  function springStep(c, dt) {
+    const k = c.k, damp = c.c;
+    c.v += (-k * (c.y - c.target) - damp * c.v) * dt;
+    c.y += c.v * dt;
+    c.rv += (-k * (c.rot - 0) - damp * c.rv) * dt;
+    c.rot += c.rv * dt;
+    c.sv += (-k * (c.scale - 1) - damp * c.sv) * dt;
+    c.scale += c.sv * dt;
+  }
+
+  function paint(c) {
+    const ch = c.el;
+    ch.style.transform =
+      'translate3d(0,' + (c.y * c.em).toFixed(2) + 'px,0) rotate(' + c.rot.toFixed(3) + 'rad) scale(' + c.scale.toFixed(3) + ')';
+  }
+
+  /* ---------- 构图：五组随句轮换 ---------- */
+  function layout(el, comp, n) {
+    if (comp !== 3) {
+      el.classList.add('comp-' + comp);
+      return;
+    }
+    el.classList.add('comp-3');
+    const R = Math.min(window.innerWidth, window.innerHeight) * 0.29;
+    const nodes = [...el.querySelectorAll('.ch')];
+    nodes.forEach((node, i) => {
+      const a = (i / Math.max(1, n)) * Math.PI * 2 - Math.PI / 2;
+      node.style.transform = 'translate(-50%,-50%) translate3d(' +
+        (Math.cos(a) * R).toFixed(1) + 'px,' + (Math.sin(a) * R).toFixed(1) + 'px,0)';
+    });
+  }
+
+  function fontFor(n) {
+    const vw = Math.min(window.innerWidth, window.innerHeight);
+    /* 一行太长就压字号，保证不溢出 */
+    const size = Math.max(18, Math.min(FONT_MAX, (vw * 0.86) / Math.max(4, n) * (n > 12 ? 1 : 1.15)));
+    return size;
+  }
+
+  function clearStage() {
+    stageEl.innerHTML = '';
+    chars.length = 0;
+  }
+
+  /* ---------- 一句入场 ---------- */
+  let active = null;    // { el, L, charsAt, n, comp }
+
+  function buildLine(L, idx) {
+    chars.length = 0;
+    const comp = idx % 5;
+    const el = document.createElement('div');
+    el.className = 'line';
+    const text = String(L.text || '').replace(/\s+/g, ' ').trim();
+    if (!text) return;
+    const n = [...text].length;
+    const fs = fontFor(n);
+    el.style.fontSize = fs.toFixed(1) + 'px';
+    el.style.fontWeight = '620';
+    el.style.letterSpacing = (comp === 2 ? '0' : '0.06em');
+    el.style.lineHeight = '1.16';
+
+    const chList = [...text];
+    /* 逐字时刻：init 里给了 chars 就照它，没给就均分 */
+    let at = null;
+    const raw = L.chars;
+    if (Array.isArray(raw) && raw.length === chList.length) {
+      const base = Math.min(...raw);
+      at = raw.map((v) => L.t + Math.max(0, v - base));
+    } else {
+      at = chList.map((_, i) => L.t + i * 0.155);
+    }
+    const span = Math.max(0.6, (L.dur || Math.max(3, chList.length * 0.24)) - 0.2);
+    if (at.length) at[at.length - 1] = Math.max(at[at.length - 1], at[0] + span * 0.62);
+
+    chList.forEach((ch) => {
+      if (ch === ' ') { const sp = document.createElement('span'); sp.className = 'ch'; sp.innerHTML = '&nbsp;'; el.appendChild(sp); return; }
+      const wrap = document.createElement('span');
+      wrap.className = 'ch';
+      const inner = document.createElement('span');
+      inner.className = 'ch-in';
+      inner.textContent = ch;
+      wrap.appendChild(inner);
+      el.appendChild(wrap);
+    });
+
+    stageEl.appendChild(el);
+    layout(el, comp, chList.filter((c) => c !== ' ').length);
+
+    const nodes = [...el.querySelectorAll('.ch-in')];
+    nodes.forEach((inner, i) => {
+      const entry = {
+        el: inner,
+        em: fs,
+        y: 0.92,          // 从下方破土
+        v: 0,
+        target: 0,
+        k: 30 + (i % 3) * 4,
+        c: 7.2,
+        rot: (i % 2 ? -1 : 1) * 0.035,
+        rv: 0,
+        scale: 0.72,
+        sv: 0,
+        at: at[i] <= L.t + 0.02 ? L.t : at[i],   // 第一字立即起
+        shown: false,
+      };
+      inner.style.opacity = '0';
+      chars.push(entry);
+    });
+
+    active = { el, L, n, comp };
+    hint.classList.add('gone');
+  }
+
+  /* ---------- 主循环 ---------- */
+  function frame(nowMs) {
+    raf = requestAnimationFrame(frame);
+    const dt = Math.min(0.05, Math.max(0.001, (nowMs - lastFrame) / 1000));
+    lastFrame = nowMs;
+
+    const T = playhead(nowMs);
+
+    /* 找当前句 */
+    let ci = -1;
+    for (let i = 0; i < lines.length; i++) if (lines[i].t <= T + 0.02) ci = i;
+
+    if (ci !== curIdx) {
+      if (ci >= 0) {
+        curIdx = ci;
+        /* 旧句先淡出，再建新句；不做整体清屏，切换才有呼吸 */
+        if (active && active.L !== lines[ci]) {
+          const oldEl = active.el;
+          oldEl.classList.add('out');
+          setTimeout(() => { if (oldEl.parentNode) oldEl.remove(); }, 700);
+        }
+        buildLine(lines[ci], ci);
+      }
+    }
+
+    /* 弹簧推进 */
+    for (let i = 0; i < chars.length; i++) {
+      const c = chars[i];
+      if (!c.shown) {
+        if (T + 0.02 >= c.at) {
+          c.shown = true;
+          c.el.style.opacity = '1';
+        } else continue;
+      }
+      springStep(c, dt);
+      paint(c);
+    }
+
+    pulse = Math.max(0, pulse - dt * 2.6);
+    document.documentElement.style.setProperty('--pulse', pulse.toFixed(3));
+  }
+
+  /* ---------- 消息 ---------- */
+  addEventListener('message', (e) => {
+    const d = e.data;
+    if (!d || d.__c100 !== 1) return;
+    if (d.type === 'init') {
+      const p = d.payload || {};
+      lines = (p.lines || []).slice().sort((a, b) => a.t - b.t);
+      curIdx = -1;
+      active = null;
+      clearStage();
+      const rgb = hexToRgb(p.accent);
+      if (rgb) {
+        accentRgb = rgb;
+        accent2Rgb = [Math.min(255, rgb[0] + 70), Math.min(255, rgb[1] + 30), Math.min(255, rgb[2] + 40)];
+        document.documentElement.style.setProperty('--accent-rgb', rgbCss(accentRgb));
+        document.documentElement.style.setProperty('--accent2-rgb', rgbCss(accent2Rgb));
+      }
+      tickTime = 0;
+      tickAt = performance.now();
+      hint.textContent = lines.length ? '等待第一句…' : '这首没有歌词';
+      hint.classList.toggle('gone', !lines.length ? false : true);
+    } else if (d.type === 'tick') {
+      const p = d.payload || {};
+      if (typeof p.time === 'number') { tickTime = p.time; tickAt = performance.now(); }
+      playing = !!p.playing;
+      if (!playing) tickAt = performance.now();
+    } else if (d.type === 'beat') {
+      pulse = 1;
+      /* 已出现的字被节拍顶一下：给一点向上的速度 */
+      for (let i = 0; i < chars.length; i++) {
+        const c = chars[i];
+        if (!c.shown) continue;
+        const boost = 0.18 + (d.payload && d.payload.level ? d.payload.level * 0.5 : 0);
+        c.v -= boost * 1.4;
+        c.sv += boost * 0.55;
+      }
+    }
+  });
+
+  addEventListener('resize', () => {
+    if (!active) return;
+    const fs = fontFor(active.n);
+    active.el.style.fontSize = fs.toFixed(1) + 'px';
+    layout(active.el, active.comp, active.n);
+  });
+
+  /* 首帧 */
+  lastFrame = performance.now();
+  raf = requestAnimationFrame(frame);
+  try { parent.postMessage({ __c100: 1, type: 'ready' }, '*'); } catch (_) { /* 独立打开时忽略 */ }
+})();
+</script>
+</body>
+</html>

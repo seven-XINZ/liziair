@@ -1215,10 +1215,14 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
             </button>
           </div>
           <button class="ntr ntr--play" id="ntr-play" aria-label="播放">
-            <!-- 三角 → 暂停双条：两半各自动 d，播放时"裂开"成形 -->
-            <svg class="ico pn-svg" viewBox="0 0 24 24" aria-hidden="true">
+            <!-- 三角 → 暂停双条：Chromium 用 d 形变，Safari 用双图标淡切 -->
+            <svg class="ico pn-svg pn-play" viewBox="0 0 24 24" aria-hidden="true">
               <path class="pn pn-l" d="M8 4.6L13.6 8.2L13.6 15.8L8 19.4Z"/>
               <path class="pn pn-r" d="M14.4 8.3L20 12L20 12L14.4 15.7Z"/>
+            </svg>
+            <svg class="ico pn-svg pn-pause" viewBox="0 0 24 24" aria-hidden="true">
+              <rect class="pn" x="7.4" y="5" width="3.4" height="14" rx="1.2"/>
+              <rect class="pn" x="13.2" y="5" width="3.4" height="14" rx="1.2"/>
             </svg>
           </button>
           <div class="ntr-side ntr-side--r">

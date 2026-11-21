@@ -4279,6 +4279,17 @@ const LONG_CACHE_EXT = new Set(['.woff', '.woff2', '.ttf', '.otf', '.eot', '.png
 const cacheControlFor = (fp) => LONG_CACHE_EXT.has(path.extname(fp).toLowerCase())
   ? 'public, max-age=604800' : 'no-cache';
 
+/* 基础安全头：全站静态响应统一带上。nosniff 防 MIME 嗅探；
+   Referrer 只透出同源；传感器权限一律关掉；frame-ancestors 用 CSP，
+   以后要放开嵌入时改这一行即可。 */
+const SEC_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Permissions-Policy': 'geolocation=(), microphone=(), camera=()',
+  'Content-Security-Policy': "frame-ancestors 'self'",
+};
+
+
 const GZIP_RE = /^(text\/|application\/(javascript|json|x-javascript|xml|wasm)|image\/svg)/;
 const gzipCache = new Map();               // etag → Buffer
 let gzipCacheBytes = 0;
@@ -4333,7 +4344,15 @@ async function serveStatic(req, res, url) {
   if (!containedIn(fp, PUBLIC_DIR)) return json(res, 403, { error: 'forbidden' });
 
   let st;
-  try { st = await fs.promises.stat(fp); } catch { return send404(res); }
+  try { st = await fs.promises.stat(fp); } catch {
+    /* 形态兜底：STAGES 登记了 659 种、stages 目录实际只构建了几十种。
+       点到未构建的会 404 成空白（用户以为"点了没反应"）。
+       统一回一张「还在施工」的页面，至少给个明确反馈。 */
+    if (/^\/stages\/[^/]+\.html$/.test(p)) {
+      const stub = path.join(PUBLIC_DIR, 'stages', '_not-built.html');
+      try { st = await fs.promises.stat(stub); fp = stub; } catch { return send404(res); }
+    } else return send404(res);
+  }
   if (st.isDirectory()) {
     fp = path.join(fp, 'index.html');
     if (!containedIn(fp, PUBLIC_DIR)) return json(res, 403, { error: 'forbidden' });
@@ -4344,7 +4363,7 @@ async function serveStatic(req, res, url) {
   const etag = 'W/"' + st.size.toString(16) + '-' + Math.floor(st.mtimeMs).toString(16) + '"';
   const cc = cacheControlFor(fp);
   const type = mimeOf(fp);
-  const baseHeaders = { 'Content-Type': type, 'Cache-Control': cc, ETag: etag, 'Accept-Ranges': 'bytes' };
+  const baseHeaders = { ...SEC_HEADERS, 'Content-Type': type, 'Cache-Control': cc, ETag: etag, 'Accept-Ranges': 'bytes' };
 
   const inm = req.headers['if-none-match'];
   if (inm && inm.split(',').map((s) => s.trim()).includes(etag)) {
@@ -4355,7 +4374,7 @@ async function serveStatic(req, res, url) {
   /* 音视频等：单段 Range → 206，拖进度条不再整段重下 */
   const range = parseRange(req.headers.range, st.size);
   if (range === 'invalid') {
-    res.writeHead(416, { 'Content-Range': 'bytes */' + st.size, 'Accept-Ranges': 'bytes' });
+    res.writeHead(416, { ...SEC_HEADERS, 'Content-Range': 'bytes */' + st.size, 'Accept-Ranges': 'bytes' });
     return res.end();
   }
   if (range) {
@@ -4440,12 +4459,73 @@ async function platformStates() {
 }
 
 
+let stageIndexCache = null;   // { at, items } —— /api/stages 目录索引，60s 缓存
+
 async function routeRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   /* ---- 健康检查：容器 HEALTHCHECK / 反代探活用，不碰任何上游 ---- */
   if (url.pathname === '/healthz') {
     return json(res, 200, { ok: true, pid: process.pid, uptime: Math.round(process.uptime()) });
+  }
+
+  /* 边车总览：一次拿到 5 个音源的端口、延迟、登录态，省得逐个 curl。
+     只探活，不碰任何账号态，3 秒超时。 */
+  if (url.pathname === '/api/health/all') {
+    const ids = ['netease', 'qq', 'kugou', 'qishui', 'bodian'];
+    const started = Date.now();
+    const sidecars = await Promise.all(ids.map(async (id) => {
+      /* QQ 是独立边车（不登记在 SIDECARS 表里），直接复用现成的 /api/qq/health */
+      if (id === 'qq') {
+        const t0 = Date.now();
+        try {
+          const r = await fetch('http://127.0.0.1:' + PORT + '/api/qq/health', { signal: AbortSignal.timeout(4000) });
+          const body = await r.json().catch(() => null);
+          return { id, port: (body && body.port) || 3210, ok: r.ok, status: r.status, ms: Date.now() - t0 };
+        } catch (e) {
+          return { id, port: 3210, ok: false, status: 0, ms: Date.now() - t0, error: String(e.message || e) };
+        }
+      }
+      const cfg = SIDECARS[id];
+      if (!cfg) return { id, ok: false, ms: 0, error: 'unknown' };
+      /* 边车是懒启动的：没人用过时不要伪装成故障，标 idle 即可 */
+      const sc = scState[id];
+      if (!sc || (!sc.child && !sc.starting)) {
+        return { id, port: cfg.port, ok: true, state: 'idle', ms: 0 };
+      }
+      const t0 = Date.now();
+      try {
+        const r = await fetch('http://127.0.0.1:' + cfg.port + cfg.ping, { signal: AbortSignal.timeout(3000) });
+        let body = null;
+        try { body = await r.json(); } catch { /* 非 JSON 也算通 */ }
+        const out = { id, port: cfg.port, ok: r.ok, status: r.status, ms: Date.now() - t0 };
+        if (body && body.loggedIn !== undefined) out.loggedIn = !!body.loggedIn;
+        return out;
+      } catch (e) {
+        return { id, port: cfg.port, ok: false, status: 0, ms: Date.now() - t0, error: String(e.message || e) };
+      }
+    }));
+    const live = sidecars.filter((x) => x.state !== 'idle');
+    return json(res, 200, { ok: live.every((x) => x.ok), totalMs: Date.now() - started, sidecars });
+  }
+
+  /* ---- 形态索引：stages 目录里真实存在的 html ----
+     STAGES 表登记了几百种，实际构建的只有几十个；前端据此过滤，
+     别再把未构建的条目列出来让人点进空白页。60 秒缓存，新增文件不用重启。 */
+  if (url.pathname === '/api/stages') {
+    if (!stageIndexCache || Date.now() - stageIndexCache.at > 60000) {
+      const dir = path.join(PUBLIC_DIR, 'stages');
+      const items = [];
+      try {
+        for (const n of await fs.promises.readdir(dir)) {
+          if (!n.endsWith('.html') || n.startsWith('_')) continue;
+          const m = /^(\d+)-/.exec(n);
+          if (m) items.push({ id: m[1], file: 'stages/' + n });
+        }
+      } catch { /* 目录缺失：返回空表，前端退回按清单全列 */ }
+      stageIndexCache = { at: Date.now(), items };
+    }
+    return json(res, 200, { total: stageIndexCache.items.length, items: stageIndexCache.items });
   }
 
   /* ---- 设备配对：客户端输入「域名 + key」换长期令牌，之后免重复登录 ---- */

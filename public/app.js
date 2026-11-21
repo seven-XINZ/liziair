@@ -1807,7 +1807,26 @@
       if (saved === 'dev' || saved === 'release') stageEdition = saved;
     }
   } catch { /* 隐私模式 / 无 location：用默认发行版 */ }
-  const stageAllows = (id) => (stageEdition === 'dev' ? true : STAGE_RELEASE_IDS.has(id));
+  /* 形态文件清单：发布版只列真实存在的 html。
+     拉不到 / 接口缺失时退回「按 STAGE_RELEASE_ORDER 全列」，绝不阻塞首屏。 */
+  let STAGE_FILE_IDS = null;
+  const stageAllows = (id) => {
+    if (stageEdition === 'dev') return true;
+    return STAGE_RELEASE_IDS.has(id) && (!STAGE_FILE_IDS || STAGE_FILE_IDS.has(id));
+  };
+  (function loadStageIndex() {
+    try {
+      fetch('/api/stages', { cache: 'no-store' }).then((r) => r.json()).then((d) => {
+        const items = (d && d.items) || [];
+        if (!items.length) return;
+        STAGE_FILE_IDS = new Set(items.map((x) => x.id));
+        /* 列表此刻已按旧清单画完，发一次重绘信号（三个列表都监听它） */
+        setTimeout(() => {
+          try { document.dispatchEvent(new CustomEvent('lizi:stage-edition', { detail: stageEdition })); } catch { /* 老环境 */ }
+        }, 0);
+      }).catch(() => { /* 离线：保持全列 */ });
+    } catch { /* 无 fetch：保持全列 */ }
+  })();
   const stageListed = (s) => !!s && (s.id === 'classic' || stageAllows(s.id));
   /** 保留清单全集 → 原 STAGES 下标；未进清单的排后面，开发者版才看得到 */
   const stageRankOf = (s) => {
@@ -13528,6 +13547,26 @@
   /* 播放模式：顺序 → 列表循环 → 单曲循环 → 随机。
      两处按钮（播放条 / 播放页）必须同步 —— 以前只改了播放条那个，
      播放页的按钮永远停在"顺序"图标上，所以看起来像没做。 */
+  /* 播放状态唯一出口：播放条图标、播放页大键语义、封面旋转、body.is-playing
+     以前这三样散在 playstate 回调里各写一遍，漏一处就出现「点了没反应」。 */
+  const PlayUI = {
+    paint(playing) {
+      const on = typeof playing === 'boolean'
+        ? playing
+        : !!(Player.audio && !Player.audio.paused);
+      if (el.btnPlay) {
+        setIcon(el.btnPlay, on ? ICONS.pause : ICONS.play);
+        el.btnPlay.setAttribute('aria-label', on ? '暂停' : '播放');
+      }
+      if (el.ntrPlay) {
+        el.ntrPlay.setAttribute('aria-label', on ? '暂停' : '播放');
+        el.ntrPlay.setAttribute('aria-pressed', on ? 'true' : 'false');
+      }
+      if (el.disc) el.disc.classList.toggle('is-playing', on);
+      document.body.classList.toggle('is-playing', on);
+    },
+  };
+
   function applyModeUI(m) {
     for (const btn of [el.btnMode, $('ntr-mode')]) {
       if (!btn || !btn.querySelector) continue;
@@ -13855,16 +13894,14 @@
   });
 
   Player.on('playstate', (playing) => {
-    setIcon(el.btnPlay, playing ? ICONS.pause : ICONS.play);
-    el.btnPlay.setAttribute('aria-label', playing ? '暂停' : '播放');
+    /* 按钮图标 / aria / body 状态统一由 PlayUI 处理 */
+    PlayUI.paint(playing);
     /* 大厅海报的播放键也跟着播放状态切三角 / 均衡条 */
     Hall.syncPlayButton();
-    /* 播放页的大封面：悬停时的播放/暂停图标跟着状态换 */
-    if (el.disc) el.disc.classList.toggle('is-playing', playing);
-    document.body.classList.toggle('is-playing', playing);
-    /* 播放键不再换图标：三角/双条由 CSS 的 d 形变完成（见 app.css） */
     StageHost.onPlaying(playing);
   });
+  /* 首帧对齐：恢复上次会话时可能已经在播，别让按钮停在三角上 */
+  PlayUI.paint();
 
   Player.on('time', ({ cur, total }) => {
     el.tCur.textContent = fmtTime(cur);

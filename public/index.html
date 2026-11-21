@@ -881,7 +881,7 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
            不重播整段开场。接线在 onboard-intro/intro.js 的 capture 监听。 -->
       <button class="setpage__row" id="row-platforms" type="button" aria-label="管理显示的平台">
         <span class="setpage__label">平台管理</span>
-        <span class="setpage__val" id="set-platforms">全部 7 个</span>
+        <span class="setpage__val" id="set-platforms">全部 5 个</span>
         <svg class="ico setpage__caret" aria-hidden="true"><use href="#i-chevron"/></svg>
       </button>
     </section>
@@ -1168,10 +1168,14 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
             </button>
           </div>
           <button class="ntr ntr--play" id="ntr-play" aria-label="播放">
-            <!-- 三角 → 暂停双条：两半各自动 d，播放时"裂开"成形 -->
-            <svg class="ico pn-svg" viewBox="0 0 24 24" aria-hidden="true">
+            <!-- 三角 → 暂停双条：Chromium 用 d 形变，Safari 用双图标淡切 -->
+            <svg class="ico pn-svg pn-play" viewBox="0 0 24 24" aria-hidden="true">
               <path class="pn pn-l" d="M8 4.6L13.6 8.2L13.6 15.8L8 19.4Z"/>
               <path class="pn pn-r" d="M14.4 8.3L20 12L20 12L14.4 15.7Z"/>
+            </svg>
+            <svg class="ico pn-svg pn-pause" viewBox="0 0 24 24" aria-hidden="true">
+              <rect class="pn" x="7.4" y="5" width="3.4" height="14" rx="1.2"/>
+              <rect class="pn" x="13.2" y="5" width="3.4" height="14" rx="1.2"/>
             </svg>
           </button>
           <div class="ntr-side ntr-side--r">
@@ -1689,5 +1693,6 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
      有了这一行，大厅入口不管走 lizi:show 还是直接 show('myalbums')，陈列架都能被叫醒；
      pages/nav.js 里 import 的是同一个 URL，模块只有一份。 -->
 <script type="module" src="pages/myalbums.js"></script>
+<script src="platforms-picker.js"></script>
 </body>
 </html>
